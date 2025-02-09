@@ -1,0 +1,36 @@
+# Dev dependencies (bring your own)
+.prettierrc
+.prettierignore
+eslint.config.mjs
+
+# Node modules
+node_modules/
+
+# Logs and db
+logs/
+*.log
+npm-debug.log*
+*.sqlite
+
+# Environment variables
+.env
+.env.*
+
+# Output directories
+dist/
+build/
+
+# IDE specific files
+.vscode/
+.idea/
+
+# MacOS specific files
+.DS_Store
+
+# Cache
+.npm/
+.eslintcache
+.stylelintcache
+.bun/
+*.tsbuildinfo
+/src/lib/db.sqlite

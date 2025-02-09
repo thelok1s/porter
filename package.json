@@ -1,0 +1,35 @@
+{
+  "name": "porter",
+  "version": "1.0.0",
+  "main": "app.ts",
+  "private": "true",
+  "scripts": {
+    "prune-db": "bun ./src/util/prunedb.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "thelok1s",
+  "license": "MIT",
+  "description": "vk crossposting & crosscommenting bot",
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/bun": "^1.2.2",
+    "@types/figlet": "^1.7.0",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.20.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "figlet": "^1.8.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "sqlite": "^5.1.1",
+    "telegraf": "^4.16.3",
+    "vk-io": "^4.9.1"
+  }
+}
