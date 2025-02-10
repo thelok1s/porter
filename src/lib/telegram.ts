@@ -1,15 +1,24 @@
-import { Telegraf } from "telegraf";
 import logger from "@/lib/logger";
 import { db } from "@/lib/database";
 import config from "../../porter.config";
+import { tgApi, tgChannelPublicLink, tgChatId, vkGlobalApi } from "@/lib/api";
+import { getVkLink } from "@/lib/vkontakte";
+
+function escapeMarkdown(text: string): string {
+  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+}
 
 export async function telegramPoster(post: any) {
   if (config.crossposting.parameters.ignoreReposts && post.isRepost) {
-    logger.info("Reposts are ignored, skipping...");
+    logger.info(
+      `Reposts are ignored, skipping (${getVkLink(post.wall.id, post.wall.ownerId)})`,
+    );
     return;
   }
   if (db.query("SELECT * FROM posts WHERE vk_id = ?").get(post.wall.id)) {
-    logger.warn(`Post ${post.wall.id} already in database, skipping...`);
+    logger.warn(
+      `Post already in db, skipping (${getVkLink(post.wall.id, post.wall.ownerId)})`,
+    );
     return;
   }
 
@@ -20,7 +29,6 @@ export async function telegramPoster(post: any) {
       const photoUrls = [];
 
       for (const attachment of post.wall.attachments) {
-        logger.debug(`Attachment: ${attachment.type.toString()}`);
         if (
           attachment.toJSON().largeSizeUrl ||
           attachment.toJSON().mediumSizeUrl ||
@@ -45,16 +53,15 @@ export async function telegramPoster(post: any) {
           .then(async (messages) => {
             const textHash = new Bun.CryptoHasher("md5");
             textHash.update(post.wall.text);
-            // Store both IDs
             db.run(
-              "INSERT INTO posts (vk_id, vk_owner_id, tg_id, tg_author_id, created_at, text, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              "INSERT INTO posts (vk_id, vk_owner_id, tg_id, discussion_tg_id, tg_author_id, created_at, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
               [
                 post.wall.id,
                 post.wall.ownerId,
                 messages[0].message_id,
-                JSON.stringify(messages[0].from),
+                null,
+                JSON.stringify(messages[0].from.id),
                 post.wall.createdAt,
-                post.wall.text,
                 textHash.digest("base64"),
                 JSON.stringify(post.wall.attachments),
               ],
@@ -71,17 +78,15 @@ export async function telegramPoster(post: any) {
           .then(async (message) => {
             const textHash = new Bun.CryptoHasher("md5");
             textHash.update(post.wall.text);
-
-            // Store both IDs
             db.run(
-              "INSERT INTO posts (vk_id, vk_owner_id, tg_id, tg_author_id, created_at, text, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              "INSERT INTO posts (vk_id, vk_owner_id, tg_id, discussion_tg_id, tg_author_id, created_at, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
               [
                 post.wall.id,
                 post.wall.ownerId,
                 message.message_id,
-                JSON.stringify(message.from),
+                null,
+                JSON.stringify(message.from.id),
                 post.wall.createdAt,
-                post.wall.text,
                 textHash.digest("base64"),
                 JSON.stringify(post.wall.attachments),
               ],
@@ -92,7 +97,7 @@ export async function telegramPoster(post: any) {
 
       // Files
       for (const attachment of post.wall.attachments) {
-        // File (gif specifically)
+        // File (GIF specifically)
         if (
           Object.prototype.hasOwnProperty.call(attachment.toJSON(), "extension")
         ) {
@@ -108,14 +113,14 @@ export async function telegramPoster(post: any) {
               textHash.update(post.wall.text);
               // Store both IDs
               db.run(
-                "INSERT INTO posts (vk_id, vk_owner_id, tg_id, tg_author_id, created_at, text, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO posts (vk_id, vk_owner_id, tg_id, discussion_tg_id, tg_author_id, created_at, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                   post.wall.id,
                   post.wall.ownerId,
                   message.message_id,
-                  JSON.stringify(message.from),
+                  null,
+                  JSON.stringify(message.from.id),
                   post.wall.createdAt,
-                  post.wall.text,
                   textHash.digest("base64"),
                   JSON.stringify(post.wall.attachments),
                 ],
@@ -127,103 +132,153 @@ export async function telegramPoster(post: any) {
         if (
           Object.prototype.hasOwnProperty.call(attachment.toJSON(), "genreId")
         ) {
-          logger.warn("Audio detected: it will not be processed.");
-          // TODO: Audio support audio.get
+          logger.warn("Audio detected: it will not be processed");
+          // TODO: Audio support (audio.get)
         }
       }
     } else {
-      // Text only
+      // If no attachments
       await tgApi.telegram
         .sendMessage(tgChannelPublicLink, post.wall.text)
         .then(async (message) => {
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(post.wall.text);
-
-          // Store both IDs
           db.run(
-            "INSERT INTO posts (vk_id, vk_owner_id, tg_id, tg_author_id, created_at, text, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO posts (vk_id, vk_owner_id, tg_id, discussion_tg_id, tg_author_id, created_at, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [
               post.wall.id,
               post.wall.ownerId,
               message.message_id,
-              JSON.stringify(message.from),
+              null,
+              JSON.stringify(message.from.id),
               post.wall.createdAt,
-              post.wall.text,
               textHash.digest("base64"),
               JSON.stringify(post.wall.attachments),
             ],
           );
         });
     }
-    logger.info("Message sent to Telegram");
+    logger.info(
+      `Successful crosspost: (${getVkLink(post.wall.id, post.wall.ownerId)}) to Telegram`,
+    );
   } catch (error) {
     logger.error(
-      `Error while sending message to Telegram:
+      `Error while crossposting to Telegram:
           ${error.message}`,
     );
   }
 }
 
 export async function telegramCommenter(comment: any) {
-  if (db.query("SELECT * FROM comments WHERE vk_id = ?").get(comment.id)) {
-    logger.warn(`Comment ${comment.wall.id} already in database, skipping...`);
-    return;
-  }
-
-  const [sender] = await vkGlobalApi.users.get({
-    user_ids: comment.fromId,
-  });
-
-  // New (restored) comment
-  if (comment.isNew || comment.isRestore) {
-    await tgApi.telegram.sendMessage(
-      tgChatId,
-      `VK: ${sender.first_name} ${sender.last_name}: ${comment.toJSON().text}`,
-      {
-        reply_parameters: {
-          chat_id: tgChatId,
-          message_id: 1,
-        },
-      },
-    );
-  } else if (comment.isEdit) {
-    // Comment is edited
-    const originalPost = db
-      .query("SELECT tg_id FROM posts WHERE vk_id = ?")
-      .get(comment.objectId);
-    if (!originalPost) {
-      logger.warn(
-        `No matching post found for VK post ID to EDIT: ${comment.toJSON().objectId}`,
-      );
-      return;
-    }
-    logger.debug(originalPost, originalPost.tg_id);
-
-    await tgApi.telegram
-      .editMessageText(
-        tgChatId,
-        originalPost.tg_id,
-        null,
-        `VK: ${sender.first_name} ${sender.last_name}: ${comment.toJSON().text}`,
-      )
-      .then((message) => {
-        db.run("UPDATE comments SET text = ? WHERE tg_id = ?", [
-          message.message_id,
-          comment.toJSON().id,
-        ]);
-      });
-  } else if (comment.isDelete) {
-    // Comment is deleted
-    const originalPost = db
-      .query("SELECT tg_id FROM posts WHERE vk_id = ?")
+  try {
+    // Check if comment already exists
+    const existingComment = db
+      .query("SELECT * FROM comments WHERE vk_comment_id = ?")
       .get(comment.id);
-    if (!originalPost) {
-      logger.warn(
-        `No matching post found for VK post ID to DELETE: ${comment.toJSON().objectId}`,
-      );
+
+    const post = db
+      .query("SELECT discussion_tg_id FROM posts WHERE vk_id = ?")
+      .get(comment.objectId);
+
+    if (!post?.discussion_tg_id) {
+      logger.warn(`Discussion not found for msg id: ${comment.objectId}`);
       return;
     }
 
-    await tgApi.telegram.deleteMessage(tgChatId, originalPost.tg_id);
+    const [sender] = await vkGlobalApi.users.get({
+      user_ids: comment.fromId,
+    });
+
+    if (comment.isNew || comment.isRestore) {
+      if (existingComment) {
+        logger.warn(`Comment already processed: ${comment.id} `);
+        return;
+      }
+      const mdText = escapeMarkdown(comment.toJSON().text);
+      const message = await tgApi.telegram.sendMessage(
+        tgChatId,
+        `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+        {
+          reply_parameters: {
+            chat_id: tgChatId,
+            message_id: post.discussion_tg_id,
+          },
+          parse_mode: "MarkdownV2",
+          link_preview_options: { is_disabled: true },
+        },
+      );
+
+      const textHash = new Bun.CryptoHasher("md5");
+      textHash.update(comment.text);
+
+      db.run(
+        `INSERT INTO comments (
+            vk_post_id,
+            vk_comment_id,
+            vk_owner_id,
+            tg_comment_id,
+            discussion_tg_id,
+            tg_author_id,
+            created_at,
+            text_hash,
+            attachments
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          comment.objectId,
+          comment.id,
+          comment.ownerId,
+          message.message_id,
+          post.discussion_tg_id,
+          message.from.id,
+          comment.toJSON().createdAt,
+          textHash.digest("base64"),
+          JSON.stringify(comment.toJSON().attachments),
+        ],
+      );
+      logger.info(`Comment added: ${comment.id} (for msg: ${post.tg_id})`);
+    } else if (comment.isEdit) {
+      const commentRecord = db
+        .query("SELECT tg_comment_id FROM comments WHERE vk_comment_id = ?")
+        .get(comment.id);
+
+      if (!commentRecord?.tg_comment_id) {
+        logger.error(`Cannot find comment to edit: ${comment.id}`);
+        return;
+      }
+
+      const mdText = escapeMarkdown(comment.toJSON().text);
+
+      await tgApi.telegram.editMessageText(
+        tgChatId,
+        commentRecord.tg_comment_id,
+        undefined,
+        `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+        {
+          parse_mode: "MarkdownV2",
+          link_preview_options: { is_disabled: true },
+        },
+      );
+
+      const textHash = new Bun.CryptoHasher("md5");
+      textHash.update(comment.text);
+      db.run("UPDATE comments SET text_hash = ? WHERE vk_comment_id = ?", [
+        textHash.digest("base64"),
+        comment.id,
+      ]);
+    } else if (comment.isDelete) {
+      const commentRecord = db
+        .query("SELECT tg_comment_id FROM comments WHERE vk_comment_id = ?")
+        .get(comment.id);
+
+      if (!commentRecord?.tg_comment_id) {
+        logger.error(`Cannot find comment to delete: ${comment.id}`);
+        return;
+      }
+
+      await tgApi.telegram.deleteMessage(tgChatId, commentRecord.tg_comment_id);
+      db.run("DELETE FROM comments WHERE vk_comment_id = ?", [comment.id]);
+    }
+  } catch (error) {
+    logger.error(`Error handling comment ${comment?.id}: ${error}`);
   }
 }

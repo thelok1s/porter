@@ -1,11 +1,10 @@
+import dotenv from "dotenv";
 import logger from "@/lib/logger";
 import { db } from "@/lib/database";
 import { vkGroupApi, tgApi, tgChannelId } from "@/lib/api";
-import dotenv from "dotenv";
-
-import config from "../porter.config";
 import { appFiglet } from "@/misc/appFiglet";
 import { telegramCommenter, telegramPoster } from "@/lib/telegram";
+import config from "../porter.config";
 
 dotenv.config();
 
@@ -22,9 +21,42 @@ if (!process.env.VK_TOKEN || !process.env.TELEGRAM_TOKEN) {
 async function main() {
   appFiglet();
 
-  tgApi.launch();
-  await vkGroupApi.updates.start();
+  tgApi.on("message", async (context) => {
+    if (
+      context.message.is_automatic_forward &&
+      context.message.forward_from_chat?.id.toString() === tgChannelId
+    ) {
+      logger.info("Caught discussion forward");
+    }
+    db.run(
+      `UPDATE posts
+       SET discussion_tg_id = ?
+       WHERE tg_id = ?`,
+      [context.message.message_id, context.message.forward_origin.message_id],
+    );
 
+    try {
+      if (!context.message.forward_origin?.message_id) {
+        logger.warn("No forward origin message ID found");
+        return;
+      }
+
+      const result = db.run(
+        `UPDATE posts
+         SET discussion_tg_id = ?
+         WHERE tg_id = ?`,
+        [context.message.message_id, context.message.forward_origin.message_id],
+      );
+
+      if (result.changes === 0) {
+        logger.warn("No posts updated with discussion ID");
+      }
+    } catch (error) {
+      logger.error("Error updating discussion ID:", error);
+    }
+  });
+  await vkGroupApi.updates.start();
+  tgApi.launch();
   try {
     if (config.crossposting.enabled) {
       if (config.crossposting.useOrigin.vk) {
@@ -60,21 +92,6 @@ async function main() {
         // TODO: IMPORTANT!! Crosscomment from tg to vk
       }
     }
-
-    tgApi.on("message", async (context) => {
-      if (
-        context.message.is_automatic_forward &&
-        context.message.forward_from_chat?.id.toString() === tgChannelId
-      ) {
-        logger.info("Caught discussion forward");
-      }
-      db.run(
-        `UPDATE posts 
-           SET discussion_tg_id = ? 
-           WHERE tg_id = ?`,
-        [context.message.message_id, context.message.forward_origin.message_id],
-      );
-    });
 
     logger.debug("Logger level is set to debug");
     logger.info("Bot started successfully\n");

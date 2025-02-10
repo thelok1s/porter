@@ -7,7 +7,7 @@ eslint.config.mjs
 node_modules/
 
 # Logs and db
-logs/
+logs/*
 *.log
 npm-debug.log*
 *.sqlite

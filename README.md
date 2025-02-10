@@ -25,11 +25,11 @@ TELEGRAM_CHAT_ID='your_disscussion_group_id'
 ### ~~npm~~
 ~~`git clone thelok1s/porter && cd porter`  
 `npm install`  
-`npm run src/app.ts`~~
+`npm run src/main.ts`~~
 ### bun
 `git clone thelok1s/porter && cd porter`  
 `bun install`  
-`bun run src/app.ts`
+`bun run src/main.ts`
 
 ## Прогресс разработки
 ### Кросспостинг

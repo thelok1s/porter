@@ -15,7 +15,7 @@ const PorterConfig: Config = {
     enabled: true,
     useOrigin: {
       vk: true,
-      tg: true,
+      tg: false,
     },
     parameters: {
       match: [],
