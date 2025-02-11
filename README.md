@@ -1,4 +1,6 @@
 # [RU] Porter
+![GitHub top language](https://img.shields.io/github/languages/top/thelok1s/porter)
+![GitHub package.json version](https://img.shields.io/github/package-json/v/thelok1s/porter)
 ```
     ____  ____  _____/ /____  _____
    / __ \/ __ \/ ___/ __/ _ \/ ___/
