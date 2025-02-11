@@ -4,7 +4,7 @@
   "main": "app.ts",
   "private": "true",
   "scripts": {
-    "prune-db": "bun ./src/util/prunedb.ts",
+    "prune-db": "bun src/scripts/prunedb.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

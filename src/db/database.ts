@@ -15,12 +15,12 @@ db.run(`
 )`);
 
 db.run(`
-    CREATE TABLE IF NOT EXISTS comments (
+    CREATE TABLE IF NOT EXISTS replies (
     id INTEGER PRIMARY KEY,
     vk_post_id INTEGER REFERENCES posts(vk_id),
-    vk_comment_id INTEGER UNIQUE,
+    vk_reply_id INTEGER UNIQUE,
     vk_owner_id INTEGER,
-    tg_comment_id INTEGER UNIQUE,
+    tg_reply_id INTEGER UNIQUE,
     discussion_tg_id INTEGER REFERENCES posts(discussion_tg_id),
     tg_author_id INTEGER,
     created_at TIMESTAMP,
@@ -30,6 +30,6 @@ db.run(`
 
 db.run("CREATE INDEX IF NOT EXISTS idx_posts_vk_id ON posts(vk_id)");
 db.run("CREATE INDEX IF NOT EXISTS idx_posts_tg_id ON posts(tg_id)");
-db.run("CREATE INDEX IF NOT EXISTS idx_comments_vk_id ON comments(vk_post_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_replies_vk_id ON replies(vk_post_id)");
 
 export { db };

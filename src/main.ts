@@ -1,10 +1,10 @@
-import dotenv from "dotenv";
-import logger from "@/lib/logger";
-import { db } from "@/lib/database";
-import { vkGroupApi, tgApi, tgChannelId } from "@/lib/api";
-import { appFiglet } from "@/misc/appFiglet";
-import { telegramCommenter, telegramPoster } from "@/lib/telegram";
 import config from "../porter.config";
+import { replyToTelegram, postToTelegram } from "@/lib/telegram";
+import { vkGroupApi, tgApi, tgChannelId } from "@/lib/api";
+import { db } from "@/db/database";
+import logger from "@/lib/logger";
+import { appFiglet } from "@/util/appFiglet";
+import dotenv from "dotenv";
 
 dotenv.config();
 
@@ -13,7 +13,13 @@ if (!process.versions.bun) {
   process.exit(1);
 }
 
-if (!process.env.VK_TOKEN || !process.env.TELEGRAM_TOKEN) {
+if (
+  !process.env.VK_TOKEN ||
+  !process.env.TELEGRAM_TOKEN ||
+  !process.env.TELEGRAM_CHANNEL_ID ||
+  !process.env.TELEGRAM_CHANNEL_PUBLIC_LINK ||
+  !process.env.TELEGRAM_CHAT_ID
+) {
   logger.fatal("Environment variables are not set or .env is missing");
   process.exit(1);
 }
@@ -26,7 +32,7 @@ async function main() {
       context.message.is_automatic_forward &&
       context.message.forward_from_chat?.id.toString() === tgChannelId
     ) {
-      logger.info("Caught discussion forward");
+      logger.info("Caught forward to discussion chat");
     }
     db.run(
       `UPDATE posts
@@ -55,14 +61,16 @@ async function main() {
       logger.error("Error updating discussion ID:", error);
     }
   });
+
   await vkGroupApi.updates.start();
   tgApi.launch();
+
   try {
     if (config.crossposting.enabled) {
       if (config.crossposting.useOrigin.vk) {
         // New VK posts webhook
         vkGroupApi.updates.on("wall_post_new", async (context) => {
-          await telegramPoster(context);
+          await postToTelegram(context);
         });
       }
       if (config.crossposting.useOrigin.tg) {
@@ -72,21 +80,18 @@ async function main() {
     }
     if (config.crosscommenting.enabled) {
       if (config.crosscommenting.useOrigin.vk) {
-        vkGroupApi.updates.on("wall_reply_new", async (context) => {
-          await telegramCommenter(context);
-        });
-
-        vkGroupApi.updates.on("wall_reply_edit", async (context) => {
-          await telegramCommenter(context);
-        });
-
-        vkGroupApi.updates.on("wall_reply_delete", async (context) => {
-          await telegramCommenter(context);
-        });
-
-        vkGroupApi.updates.on("wall_reply_restore", async (context) => {
-          await telegramCommenter(context);
-        });
+        // Replies webhooks
+        vkGroupApi.updates.on(
+          [
+            "wall_reply_new",
+            "wall_reply_restore",
+            "wall_reply_edit",
+            "wall_reply_delete",
+          ],
+          async (context) => {
+            await replyToTelegram(context);
+          },
+        );
       }
       if (config.crosscommenting.useOrigin.tg) {
         // TODO: IMPORTANT!! Crosscomment from tg to vk

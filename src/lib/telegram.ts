@@ -1,23 +1,27 @@
-import logger from "@/lib/logger";
-import { db } from "@/lib/database";
 import config from "../../porter.config";
+import logger from "@/lib/logger";
+import { db } from "@/db/database";
 import { tgApi, tgChannelPublicLink, tgChatId, vkGlobalApi } from "@/lib/api";
 import { getVkLink } from "@/lib/vkontakte";
+import { Post } from "@/interfaces/Post";
+import { Reply } from "@/interfaces/Reply";
 
 function escapeMarkdown(text: string): string {
   return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
 }
 
-export async function telegramPoster(post: any) {
+export async function postToTelegram(post: any) {
+  // Check if repost
   if (config.crossposting.parameters.ignoreReposts && post.isRepost) {
     logger.info(
       `Reposts are ignored, skipping (${getVkLink(post.wall.id, post.wall.ownerId)})`,
     );
     return;
   }
+  // Check if duplicate
   if (db.query("SELECT * FROM posts WHERE vk_id = ?").get(post.wall.id)) {
     logger.warn(
-      `Post already in db, skipping (${getVkLink(post.wall.id, post.wall.ownerId)})`,
+      `Already ported post (${getVkLink(post.wall.id, post.wall.ownerId)})`,
     );
     return;
   }
@@ -159,98 +163,254 @@ export async function telegramPoster(post: any) {
         });
     }
     logger.info(
-      `Successful crosspost: (${getVkLink(post.wall.id, post.wall.ownerId)}) to Telegram`,
+      `[VK –> TG] Successfully ported: ${getVkLink(post.wall.id, post.wall.ownerId)}`,
     );
   } catch (error) {
-    logger.error(
-      `Error while crossposting to Telegram:
-          ${error.message}`,
-    );
+    logger.error(`[VK -/-> TG] Error while porting: ${error.message}`);
   }
 }
 
-export async function telegramCommenter(comment: any) {
+export async function replyToTelegram(reply: any) {
   try {
-    // Check if comment already exists
-    const existingComment = db
-      .query("SELECT * FROM comments WHERE vk_comment_id = ?")
-      .get(comment.id);
-
-    const post = db
+    const post: Post = db
       .query("SELECT discussion_tg_id FROM posts WHERE vk_id = ?")
-      .get(comment.objectId);
+      .get(reply.objectId) as Post;
 
     if (!post?.discussion_tg_id) {
-      logger.warn(`Discussion not found for msg id: ${comment.objectId}`);
+      logger.warn(`Discussion not found for msg id: ${reply.objectId}`);
       return;
     }
 
     const [sender] = await vkGlobalApi.users.get({
-      user_ids: comment.fromId,
+      user_ids: reply.fromId,
     });
 
-    if (comment.isNew || comment.isRestore) {
-      if (existingComment) {
-        logger.warn(`Comment already processed: ${comment.id} `);
+    if (reply.isNew || reply.isRestore) {
+      // Prevent known duplicates
+      if (
+        db.query("SELECT * FROM replies WHERE vk_reply_id = ?").get(reply.id)
+      ) {
+        logger.warn(`Reply already ported: ${reply.id} `);
         return;
       }
-      const mdText = escapeMarkdown(comment.toJSON().text);
-      const message = await tgApi.telegram.sendMessage(
-        tgChatId,
-        `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
-        {
-          reply_parameters: {
-            chat_id: tgChatId,
-            message_id: post.discussion_tg_id,
-          },
-          parse_mode: "MarkdownV2",
-          link_preview_options: { is_disabled: true },
-        },
-      );
 
-      const textHash = new Bun.CryptoHasher("md5");
-      textHash.update(comment.text);
+      const mdText = escapeMarkdown(reply.toJSON().text);
 
-      db.run(
-        `INSERT INTO comments (
+      // Check for attachments
+      if (reply.attachments.toString().length > 0) {
+        const photoUrls = [];
+
+        for (const attachment of reply.attachments) {
+          if (
+            attachment.toJSON().largeSizeUrl ||
+            attachment.toJSON().mediumSizeUrl ||
+            attachment.toJSON().smallSizeUrl
+          ) {
+            const url =
+              attachment.toJSON().largeSizeUrl ||
+              attachment.toJSON().mediumSizeUrl ||
+              attachment.toJSON().smallSizeUrl;
+            photoUrls.push({
+              type: "photo",
+              media: url,
+            });
+          }
+        }
+
+        // Multiple photos
+        if (photoUrls.length > 1) {
+          photoUrls[0].caption = `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`;
+          photoUrls[0].parse_mode = reply.text;
+          photoUrls[0].link_preview_options.is_disabled = true;
+          const reply_msg = await tgApi.telegram.sendMediaGroup(
+            tgChatId,
+            photoUrls,
+            {
+              reply_parameters: {
+                chat_id: tgChatId,
+                message_id: post.discussion_tg_id,
+              },
+            },
+          );
+
+          const textHash = new Bun.CryptoHasher("md5");
+          textHash.update(reply.text);
+
+          db.run(
+            `INSERT INTO replies (
             vk_post_id,
-            vk_comment_id,
+            vk_reply_id,
             vk_owner_id,
-            tg_comment_id,
+            tg_reply_id,
             discussion_tg_id,
             tg_author_id,
             created_at,
             text_hash,
             attachments
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          comment.objectId,
-          comment.id,
-          comment.ownerId,
-          message.message_id,
-          post.discussion_tg_id,
-          message.from.id,
-          comment.toJSON().createdAt,
-          textHash.digest("base64"),
-          JSON.stringify(comment.toJSON().attachments),
-        ],
-      );
-      logger.info(`Comment added: ${comment.id} (for msg: ${post.tg_id})`);
-    } else if (comment.isEdit) {
-      const commentRecord = db
-        .query("SELECT tg_comment_id FROM comments WHERE vk_comment_id = ?")
-        .get(comment.id);
+            [
+              reply.objectId,
+              reply.id,
+              reply.ownerId,
+              reply_msg[0].message_id,
+              post.discussion_tg_id,
+              reply_msg[0].from.id,
+              reply.toJSON().createdAt,
+              textHash.digest("base64"),
+              JSON.stringify(reply.toJSON().attachments),
+            ],
+          );
 
-      if (!commentRecord?.tg_comment_id) {
-        logger.error(`Cannot find comment to edit: ${comment.id}`);
+          // One photo
+        } else if (photoUrls.length === 1) {
+          const reply_msg = await tgApi.telegram.sendPhoto(
+            tgChatId,
+            photoUrls[0].media,
+            {
+              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+              reply_parameters: {
+                chat_id: tgChatId,
+                message_id: post.discussion_tg_id,
+              },
+            },
+          );
+
+          const textHash = new Bun.CryptoHasher("md5");
+          textHash.update(reply.text);
+
+          db.run(
+            `INSERT INTO replies (
+            vk_post_id,
+            vk_reply_id,
+            vk_owner_id,
+            tg_reply_id,
+            discussion_tg_id,
+            tg_author_id,
+            created_at,
+            text_hash,
+            attachments
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              reply.objectId,
+              reply.id,
+              reply.ownerId,
+              reply_msg.message_id,
+              post.discussion_tg_id,
+              reply_msg.from.id,
+              reply.toJSON().createdAt,
+              textHash.digest("base64"),
+              JSON.stringify(reply.toJSON().attachments),
+            ],
+          );
+
+          // File (GIF specifically)
+        } else if (
+          Object.prototype.hasOwnProperty.call(
+            reply.attachments[0].toJSON(),
+            "extension",
+          )
+        ) {
+          const reply_msg = await tgApi.telegram.sendAnimation(
+            tgChatId,
+            reply.attachments[0].toJSON().url,
+            {
+              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+              reply_parameters: {
+                chat_id: tgChatId,
+                message_id: post.discussion_tg_id,
+              },
+              parse_mode: "MarkdownV2",
+            },
+          );
+
+          const textHash = new Bun.CryptoHasher("md5");
+          textHash.update(reply.text);
+
+          db.run(
+            `INSERT INTO replies (
+                vk_post_id,
+                vk_reply_id,
+                vk_owner_id,
+                tg_reply_id,
+                discussion_tg_id,
+                tg_author_id,
+                created_at,
+                text_hash,
+                attachments
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              reply.objectId,
+              reply.id,
+              reply.ownerId,
+              reply_msg.message_id,
+              post.discussion_tg_id,
+              reply_msg.from.id,
+              reply.toJSON().createdAt,
+              textHash.digest("base64"),
+              JSON.stringify(reply.toJSON().attachments),
+            ],
+          );
+        }
+      } else {
+        // If no attachments
+        const reply_msg = await tgApi.telegram.sendMessage(
+          tgChatId,
+          `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+          {
+            reply_parameters: {
+              chat_id: tgChatId,
+              message_id: post.discussion_tg_id,
+            },
+            parse_mode: "MarkdownV2",
+            link_preview_options: { is_disabled: true },
+          },
+        );
+
+        const textHash = new Bun.CryptoHasher("md5");
+        textHash.update(reply.text);
+
+        db.run(
+          `INSERT INTO replies (
+            vk_post_id,
+            vk_reply_id,
+            vk_owner_id,
+            tg_reply_id,
+            discussion_tg_id,
+            tg_author_id,
+            created_at,
+            text_hash,
+            attachments
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            reply.objectId,
+            reply.id,
+            reply.ownerId,
+            reply_msg.message_id,
+            post.discussion_tg_id,
+            reply_msg.from.id,
+            reply.toJSON().createdAt,
+            textHash.digest("base64"),
+            JSON.stringify(reply.toJSON().attachments),
+          ],
+        );
+      }
+
+      logger.info(`Reply ported: ${reply.id} (for msg: ${post.tg_id})`);
+    } else if (reply.isEdit) {
+      const replyRecord: Reply = db
+        .query("SELECT tg_reply_id FROM replies WHERE vk_reply_id = ?")
+        .get(reply.id) as Reply;
+
+      if (!replyRecord?.tg_reply_id) {
+        logger.error(`Cannot find reply to edit: ${reply.id}`);
         return;
       }
 
-      const mdText = escapeMarkdown(comment.toJSON().text);
+      const mdText = escapeMarkdown(reply.toJSON().text);
 
       await tgApi.telegram.editMessageText(
         tgChatId,
-        commentRecord.tg_comment_id,
+        replyRecord.tg_reply_id,
         undefined,
         `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
         {
@@ -260,25 +420,25 @@ export async function telegramCommenter(comment: any) {
       );
 
       const textHash = new Bun.CryptoHasher("md5");
-      textHash.update(comment.text);
-      db.run("UPDATE comments SET text_hash = ? WHERE vk_comment_id = ?", [
+      textHash.update(reply.text);
+      db.run("UPDATE replies SET text_hash = ? WHERE vk_reply_id = ?", [
         textHash.digest("base64"),
-        comment.id,
+        reply.id,
       ]);
-    } else if (comment.isDelete) {
-      const commentRecord = db
-        .query("SELECT tg_comment_id FROM comments WHERE vk_comment_id = ?")
-        .get(comment.id);
+    } else if (reply.isDelete) {
+      const replyRecord: Reply = db
+        .query("SELECT tg_reply_id FROM replies WHERE vk_reply_id = ?")
+        .get(reply.id) as Reply;
 
-      if (!commentRecord?.tg_comment_id) {
-        logger.error(`Cannot find comment to delete: ${comment.id}`);
+      if (!replyRecord?.tg_reply_id) {
+        logger.error(`Cannot find reply to delete: ${reply.id}`);
         return;
       }
 
-      await tgApi.telegram.deleteMessage(tgChatId, commentRecord.tg_comment_id);
-      db.run("DELETE FROM comments WHERE vk_comment_id = ?", [comment.id]);
+      await tgApi.telegram.deleteMessage(tgChatId, replyRecord.tg_reply_id);
+      db.run("DELETE FROM replies WHERE vk_reply_id = ?", [reply.id]);
     }
   } catch (error) {
-    logger.error(`Error handling comment ${comment?.id}: ${error}`);
+    logger.error(`Error handling reply ${reply?.id}: ${error}`);
   }
 }
