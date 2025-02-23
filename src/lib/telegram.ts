@@ -5,12 +5,14 @@ import { tgApi, tgChannelPublicLink, tgChatId, vkGlobalApi } from "@/lib/api";
 import { getVkLink } from "@/lib/vkontakte";
 import { Post } from "@/interfaces/Post";
 import { Reply } from "@/interfaces/Reply";
+import { InputMediaPhoto } from "telegraf/types";
 
 function escapeMarkdown(text: string): string {
   return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
 }
 
 export async function postToTelegram(post: any) {
+  logger.debug(post.toJSON());
   // Check if repost
   if (config.crossposting.parameters.ignoreReposts && post.isRepost) {
     logger.info(
@@ -171,6 +173,7 @@ export async function postToTelegram(post: any) {
 }
 
 export async function replyToTelegram(reply: any) {
+  logger.debug(reply.toJSON());
   try {
     const post: Post = db
       .query("SELECT discussion_tg_id FROM posts WHERE vk_id = ?")
@@ -219,17 +222,23 @@ export async function replyToTelegram(reply: any) {
 
         // Multiple photos
         if (photoUrls.length > 1) {
-          photoUrls[0].caption = `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`;
-          photoUrls[0].parse_mode = reply.text;
-          photoUrls[0].link_preview_options.is_disabled = true;
+          const mediaGroup: InputMediaPhoto[] = photoUrls.map((photo, index) => ({
+            type: 'photo' as const,
+            media: photo.media,
+            ...(index === 0 ? {
+              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+              parse_mode: "MarkdownV2"
+            } : {})
+          }));
+
           const reply_msg = await tgApi.telegram.sendMediaGroup(
             tgChatId,
-            photoUrls,
+            mediaGroup,
             {
               reply_parameters: {
                 chat_id: tgChatId,
                 message_id: post.discussion_tg_id,
-              },
+              }
             },
           );
 
@@ -268,6 +277,7 @@ export async function replyToTelegram(reply: any) {
             photoUrls[0].media,
             {
               caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+              parse_mode: "MarkdownV2",
               reply_parameters: {
                 chat_id: tgChatId,
                 message_id: post.discussion_tg_id,
@@ -393,9 +403,10 @@ export async function replyToTelegram(reply: any) {
             JSON.stringify(reply.toJSON().attachments),
           ],
         );
+        logger.info(
+          `[VK –> TG] Reply ported: ${reply.id} (for msg: ${reply_msg.message_id})`,
+        );
       }
-
-      logger.info(`Reply ported: ${reply.id} (for msg: ${post.tg_id})`);
     } else if (reply.isEdit) {
       const replyRecord: Reply = db
         .query("SELECT tg_reply_id FROM replies WHERE vk_reply_id = ?")

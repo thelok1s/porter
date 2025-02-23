@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import logger from "@/lib/logger";
 import { appFiglet } from "@/util/appFiglet";
 import dotenv from "dotenv";
+import { NarrowedContext } from "telegraf";
 
 dotenv.config();
 
@@ -27,50 +28,20 @@ if (
 async function main() {
   appFiglet();
 
-  tgApi.on("message", async (context) => {
-    if (
-      context.message.is_automatic_forward &&
-      context.message.forward_from_chat?.id.toString() === tgChannelId
-    ) {
-      logger.info("Caught forward to discussion chat");
-    }
-    db.run(
-      `UPDATE posts
-       SET discussion_tg_id = ?
-       WHERE tg_id = ?`,
-      [context.message.message_id, context.message.forward_origin.message_id],
-    );
-
-    try {
-      if (!context.message.forward_origin?.message_id) {
-        logger.warn("No forward origin message ID found");
-        return;
-      }
-
-      const result = db.run(
-        `UPDATE posts
-         SET discussion_tg_id = ?
-         WHERE tg_id = ?`,
-        [context.message.message_id, context.message.forward_origin.message_id],
-      );
-
-      if (result.changes === 0) {
-        logger.warn("No posts updated with discussion ID");
-      }
-    } catch (error) {
-      logger.error("Error updating discussion ID:", error);
-    }
-  });
-
+  const START_TIME = Math.floor(Date.now() / 1000);
   await vkGroupApi.updates.start();
-  tgApi.launch();
+  tgApi.launch().then();
 
   try {
     if (config.crossposting.enabled) {
       if (config.crossposting.useOrigin.vk) {
         // New VK posts webhook
         vkGroupApi.updates.on("wall_post_new", async (context) => {
-          await postToTelegram(context);
+          logger.debug(START_TIME)
+          logger.debug(context.wall.createdAt)
+          if (context.wall.createdAt > START_TIME) {
+            await postToTelegram(context);
+          }
         });
       }
       if (config.crossposting.useOrigin.tg) {
@@ -79,6 +50,49 @@ async function main() {
       }
     }
     if (config.crosscommenting.enabled) {
+      tgApi.on("message", async (context: NarrowedContext<any, any>) => {
+        // logger.debug(context)
+        if (
+          context.message.is_automatic_forward &&
+          context.message.forward_from_chat?.id.toString() ===
+            "-100" + tgChannelId.toString()
+        ) {
+          logger.debug(`Caught automatic forward:
+        Discussion msg ID: ${context.message.message_id}
+        Original msg ID: ${context.message.forward_from_message_id}
+      `);
+
+          try {
+            const result = db.run(
+              `UPDATE posts
+           SET discussion_tg_id = ?
+           WHERE tg_id = ?`,
+              [
+                context.message.message_id,
+                context.message.forward_from_message_id,
+              ],
+            );
+
+            if (result.changes === 0) {
+              logger.warn(`No posts updated with discussion ID.
+            Channel msg ID: ${context.message.forward_from_message_id}
+            Discussion msg ID: ${context.message.message_id}
+          `);
+            } else {
+              logger.info(`[VK -> TG] Successfully linked discussion message:
+            Channel msg ID: ${context.message.forward_from_message_id}
+            Discussion msg ID: ${context.message.message_id}
+          `);
+            }
+          } catch (error) {
+            logger.error(`Error updating discussion ID: ${error.message}
+          Channel msg ID: ${context.message.forward_from_message_id}
+          Discussion msg ID: ${context.message.message_id}
+        `);
+          }
+        }
+      });
+
       if (config.crosscommenting.useOrigin.vk) {
         // Replies webhooks
         vkGroupApi.updates.on(
@@ -89,7 +103,9 @@ async function main() {
             "wall_reply_delete",
           ],
           async (context) => {
-            await replyToTelegram(context);
+            if (context.createdAt > START_TIME) {
+              await replyToTelegram(context);
+            }
           },
         );
       }
@@ -99,7 +115,7 @@ async function main() {
     }
 
     logger.debug("Logger level is set to debug");
-    logger.info("Bot started successfully\n");
+    logger.info("Bot started successfully (･ω<)☆ \n");
 
     //  const sync = setInterval(() => {syncRecentPosts()}, 1000*60*10);
   } catch (error) {
@@ -120,7 +136,6 @@ main().catch((error) => {
     tgApi.stop(signal.toString());
     db.close();
     logger.warn(`Shutting down (${signal.toString()})`);
-    logger.flush();
     process.exit(0);
   });
 });
