@@ -37,8 +37,6 @@ async function main() {
       if (config.crossposting.useOrigin.vk) {
         // New VK posts webhook
         vkGroupApi.updates.on("wall_post_new", async (context) => {
-          logger.debug(START_TIME)
-          logger.debug(context.wall.createdAt)
           if (context.wall.createdAt > START_TIME) {
             await postToTelegram(context);
           }

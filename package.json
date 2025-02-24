@@ -1,11 +1,10 @@
 {
   "name": "porter",
-  "version": "0.3.0",
+  "version": "1.0.0-beta",
   "main": "app.ts",
   "private": "true",
   "scripts": {
-    "prune-db": "bun src/scripts/prunedb.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "prune-db": "bun src/scripts/prunedb.ts"
   },
   "keywords": [],
   "author": "thelok1s",

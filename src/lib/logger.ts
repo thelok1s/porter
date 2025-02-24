@@ -1,8 +1,11 @@
 import pino from "pino";
+import { Config } from "@/interfaces/Config";
+import PorterConfig from "../../porter.config";
+const config = PorterConfig;
 
 const logger = pino(
   {
-    level: "debug",
+    level: config.loggingLevel,
   },
   pino.multistream([
     {
@@ -13,9 +16,13 @@ const logger = pino(
         target: "pino-pretty",
         options: {
           colorize: true,
+          ignore: "pid,hostname",
+          colorizeObjects: true,
+          include: "time,level",
+          translateTime: "dd.mm-HH:MM:ss",
         },
       }),
-      level: "debug",
+      level: config.loggingLevel,
     },
   ]),
 );

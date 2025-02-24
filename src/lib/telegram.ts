@@ -12,7 +12,6 @@ function escapeMarkdown(text: string): string {
 }
 
 export async function postToTelegram(post: any) {
-  logger.debug(post.toJSON());
   // Check if repost
   if (config.crossposting.parameters.ignoreReposts && post.isRepost) {
     logger.info(
@@ -54,50 +53,73 @@ export async function postToTelegram(post: any) {
       // Multiple photos
       if (photoUrls.length > 1) {
         photoUrls[0].caption = post.wall.text;
-        await tgApi.telegram
-          .sendMediaGroup(tgChannelPublicLink, photoUrls)
-          .then(async (messages) => {
-            const textHash = new Bun.CryptoHasher("md5");
-            textHash.update(post.wall.text);
-            db.run(
-              "INSERT INTO posts (vk_id, vk_owner_id, tg_id, discussion_tg_id, tg_author_id, created_at, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-              [
-                post.wall.id,
-                post.wall.ownerId,
-                messages[0].message_id,
-                null,
-                JSON.stringify(messages[0].from.id),
-                post.wall.createdAt,
-                textHash.digest("base64"),
-                JSON.stringify(post.wall.attachments),
-              ],
-            );
-          });
+        const post_msg = await tgApi.telegram.sendMediaGroup(
+          tgChannelPublicLink,
+          photoUrls,
+        );
+
+        const textHash = new Bun.CryptoHasher("md5");
+        textHash.update(post.wall.text);
+
+        db.run(
+          `INSERT INTO posts (
+                   vk_id,
+                   vk_owner_id, 
+                   tg_id,
+                   discussion_tg_id,
+                   tg_author_id,
+                   created_at,
+                   text_hash,
+                   attachments
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            post.wall.id,
+            post.wall.ownerId,
+            post_msg[0].message_id,
+            null,
+            JSON.stringify(post_msg[0].from.id),
+            post.wall.createdAt,
+            textHash.digest("base64"),
+            JSON.stringify(post.wall.attachments),
+          ],
+        );
         textSent = true;
 
         // One photo
       } else if (photoUrls.length === 1) {
-        await tgApi.telegram
-          .sendPhoto(tgChannelPublicLink, photoUrls[0].media, {
+        const post_msg = await tgApi.telegram.sendPhoto(
+          tgChannelPublicLink,
+          photoUrls[0].media,
+          {
             caption: post.wall.text,
-          })
-          .then(async (message) => {
-            const textHash = new Bun.CryptoHasher("md5");
-            textHash.update(post.wall.text);
-            db.run(
-              "INSERT INTO posts (vk_id, vk_owner_id, tg_id, discussion_tg_id, tg_author_id, created_at, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-              [
-                post.wall.id,
-                post.wall.ownerId,
-                message.message_id,
-                null,
-                JSON.stringify(message.from.id),
-                post.wall.createdAt,
-                textHash.digest("base64"),
-                JSON.stringify(post.wall.attachments),
-              ],
-            );
-          });
+          },
+        );
+
+        const textHash = new Bun.CryptoHasher("md5");
+        textHash.update(post.wall.text);
+
+        db.run(
+          `INSERT INTO posts (
+            vk_id,
+            vk_owner_id,
+            tg_id,
+            discussion_tg_id,
+            tg_author_id,
+            created_at,
+            text_hash,
+            attachments
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            post.wall.id,
+            post.wall.ownerId,
+            post_msg.message_id,
+            null,
+            JSON.stringify(post_msg.from.id),
+            post.wall.createdAt,
+            textHash.digest("base64"),
+            JSON.stringify(post.wall.attachments),
+          ],
+        );
         textSent = true;
       }
 
@@ -107,33 +129,40 @@ export async function postToTelegram(post: any) {
         if (
           Object.prototype.hasOwnProperty.call(attachment.toJSON(), "extension")
         ) {
-          logger.info("Adding a file");
-          await tgApi.telegram
-            .sendAnimation(
-              tgChannelPublicLink,
-              attachment.toJSON().url,
-              !textSent ? { caption: post.wall.text } : {},
-            )
-            .then(async (message) => {
-              const textHash = new Bun.CryptoHasher("md5");
-              textHash.update(post.wall.text);
-              // Store both IDs
-              db.run(
-                "INSERT INTO posts (vk_id, vk_owner_id, tg_id, discussion_tg_id, tg_author_id, created_at, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                  post.wall.id,
-                  post.wall.ownerId,
-                  message.message_id,
-                  null,
-                  JSON.stringify(message.from.id),
-                  post.wall.createdAt,
-                  textHash.digest("base64"),
-                  JSON.stringify(post.wall.attachments),
-                ],
-              );
-            });
+          const post_msg = await tgApi.telegram.sendAnimation(
+            tgChannelPublicLink,
+            attachment.toJSON().url,
+            !textSent ? { caption: post.wall.text } : {},
+          );
+
+          const textHash = new Bun.CryptoHasher("md5");
+          textHash.update(post.wall.text);
+
+          db.run(
+            `INSERT INTO posts (
+                   vk_id,
+                   vk_owner_id,
+                   tg_id,
+                   discussion_tg_id,
+                   tg_author_id,
+                   created_at,
+                   text_hash,
+                   attachments
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              post.wall.id,
+              post.wall.ownerId,
+              post_msg.message_id,
+              null,
+              JSON.stringify(post_msg.from.id),
+              post.wall.createdAt,
+              textHash.digest("base64"),
+              JSON.stringify(post.wall.attachments),
+            ],
+          );
           textSent = true;
         }
+
         // Audio
         if (
           Object.prototype.hasOwnProperty.call(attachment.toJSON(), "genreId")
@@ -141,28 +170,91 @@ export async function postToTelegram(post: any) {
           logger.warn("Audio detected: it will not be processed");
           // TODO: Audio support (audio.get)
         }
-      }
-    } else {
-      // If no attachments
-      await tgApi.telegram
-        .sendMessage(tgChannelPublicLink, post.wall.text)
-        .then(async (message) => {
+
+        // Polls
+        if (
+          Object.prototype.hasOwnProperty.call(
+            attachment.toJSON(),
+            "question",
+          ) &&
+          !config.crossposting.parameters.ignorePolls
+        ) {
+          const pollOptions: string[] = attachment.answers.map(
+            (answer) => answer.text,
+          );
+
+          if (!textSent) {
+            const msg = await tgApi.telegram.sendMessage(
+              tgChannelPublicLink,
+              post.wall.text,
+            );
+          }
+
+          const post_msg = await tgApi.telegram.sendPoll(
+            tgChannelPublicLink,
+            attachment.question,
+            pollOptions,
+          );
+
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(post.wall.text);
+
           db.run(
-            "INSERT INTO posts (vk_id, vk_owner_id, tg_id, discussion_tg_id, tg_author_id, created_at, text_hash, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            `INSERT INTO posts (
+                   vk_id, 
+                   vk_owner_id, 
+                   tg_id, 
+                   discussion_tg_id, 
+                   tg_author_id, 
+                   created_at, 
+                   text_hash, 
+                   attachments
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               post.wall.id,
               post.wall.ownerId,
-              message.message_id,
+              post_msg.message_id,
               null,
-              JSON.stringify(message.from.id),
+              JSON.stringify(post_msg.from.id),
               post.wall.createdAt,
               textHash.digest("base64"),
               JSON.stringify(post.wall.attachments),
             ],
           );
-        });
+        }
+      }
+    } else {
+      // If no attachments
+      const post_msg = await tgApi.telegram.sendMessage(
+        tgChannelPublicLink,
+        post.wall.text,
+      );
+
+      const textHash = new Bun.CryptoHasher("md5");
+      textHash.update(post.wall.text);
+
+      db.run(
+        `INSERT INTO posts (
+            vk_id, 
+            vk_owner_id,
+            tg_id,
+            discussion_tg_id,
+            tg_author_id, 
+            created_at,
+            text_hash,
+            attachments
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          post.wall.id,
+          post.wall.ownerId,
+          post_msg.message_id,
+          null,
+          JSON.stringify(post_msg.from.id),
+          post.wall.createdAt,
+          textHash.digest("base64"),
+          JSON.stringify(post.wall.attachments),
+        ],
+      );
     }
     logger.info(
       `[VK –> TG] Successfully ported: ${getVkLink(post.wall.id, post.wall.ownerId)}`,
@@ -173,7 +265,6 @@ export async function postToTelegram(post: any) {
 }
 
 export async function replyToTelegram(reply: any) {
-  logger.debug(reply.toJSON());
   try {
     const post: Post = db
       .query("SELECT discussion_tg_id FROM posts WHERE vk_id = ?")
@@ -222,14 +313,18 @@ export async function replyToTelegram(reply: any) {
 
         // Multiple photos
         if (photoUrls.length > 1) {
-          const mediaGroup: InputMediaPhoto[] = photoUrls.map((photo, index) => ({
-            type: 'photo' as const,
-            media: photo.media,
-            ...(index === 0 ? {
-              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
-              parse_mode: "MarkdownV2"
-            } : {})
-          }));
+          const mediaGroup: InputMediaPhoto[] = photoUrls.map(
+            (photo, index) => ({
+              type: "photo" as const,
+              media: photo.media,
+              ...(index === 0
+                ? {
+                    caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+                    parse_mode: "MarkdownV2",
+                  }
+                : {}),
+            }),
+          );
 
           const reply_msg = await tgApi.telegram.sendMediaGroup(
             tgChatId,
@@ -238,7 +333,7 @@ export async function replyToTelegram(reply: any) {
               reply_parameters: {
                 chat_id: tgChatId,
                 message_id: post.discussion_tg_id,
-              }
+              },
             },
           );
 

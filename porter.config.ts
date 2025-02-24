@@ -1,6 +1,7 @@
 import { Config } from "@/interfaces/Config";
 
 const PorterConfig: Config = {
+  loggingLevel: "debug",
   crossposting: {
     enabled: true,
     useOrigin: {
@@ -9,6 +10,7 @@ const PorterConfig: Config = {
     },
     parameters: {
       ignoreReposts: true,
+      ignorePolls: false,
     },
   },
   crosscommenting: {

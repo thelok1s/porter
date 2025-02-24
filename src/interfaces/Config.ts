@@ -1,4 +1,5 @@
 export interface Config {
+  loggingLevel: "debug" | "info" | "warn" | "error",
   crossposting: {
     enabled: boolean,
     useOrigin: {
@@ -7,6 +8,7 @@ export interface Config {
     },
     parameters: {
       ignoreReposts: boolean,
+      ignorePolls: boolean,
     },
   },
   crosscommenting: {
