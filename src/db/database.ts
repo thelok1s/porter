@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-const db = new Database("./src/lib/persistence.sqlite");
+const db = new Database("./src/db/persistence.sqlite");
 
 db.run(`
     CREATE TABLE IF NOT EXISTS posts (
