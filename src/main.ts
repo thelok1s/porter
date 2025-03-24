@@ -38,6 +38,7 @@ async function main() {
         // New VK posts webhook
         vkGroupApi.updates.on("wall_post_new", async (context) => {
           if (context.wall.createdAt > START_TIME) {
+            logger.debug(context)
             await postToTelegram(context);
           }
         });
@@ -49,7 +50,6 @@ async function main() {
     }
     if (config.crosscommenting.enabled) {
       tgApi.on("message", async (context: NarrowedContext<any, any>) => {
-        // logger.debug(context)
         if (
           context.message.is_automatic_forward &&
           context.message.forward_from_chat?.id.toString() ===
@@ -102,6 +102,7 @@ async function main() {
           ],
           async (context) => {
             if (context.createdAt > START_TIME) {
+              logger.debug(context)
               await replyToTelegram(context);
             }
           },

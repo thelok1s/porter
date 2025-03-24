@@ -11,7 +11,24 @@ function escapeMarkdown(text: string): string {
   return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
 }
 
+function convertVkLinks(text: string): string {
+  // Convert [https://m.vk.com/username|Display Name] format
+  text = text.replace(/\[(https?:\/\/(?:m\.)?vk\.com\/[^|]+)\|([^\]]+)\]/g,
+    (_, url, displayName) => {
+      return `[${escapeMarkdown(displayName)}](${url})`;
+    });
+
+  // Convert [id123456|Display Name] format
+  text = text.replace(/\[id(\d+)\|([^\]]+)\]/g,
+    (_, userId, displayName) => {
+      return `[${escapeMarkdown(displayName)}](https://vk.com/id${userId})`;
+    });
+
+  return text;
+}
+
 export async function postToTelegram(post: any) {
+  logger.debug(`vk post context: ${JSON.stringify(post)}`);
   // Check if repost
   if (config.crossposting.parameters.ignoreReposts && post.isRepost) {
     logger.info(
@@ -52,7 +69,7 @@ export async function postToTelegram(post: any) {
 
       // Multiple photos
       if (photoUrls.length > 1) {
-        photoUrls[0].caption = post.wall.text;
+        photoUrls[0].caption = convertVkLinks(post.wall.text);
         const post_msg = await tgApi.telegram.sendMediaGroup(
           tgChannelPublicLink,
           photoUrls,
@@ -91,7 +108,7 @@ export async function postToTelegram(post: any) {
           tgChannelPublicLink,
           photoUrls[0].media,
           {
-            caption: post.wall.text,
+            caption: convertVkLinks(post.wall.text),
           },
         );
 
@@ -132,7 +149,7 @@ export async function postToTelegram(post: any) {
           const post_msg = await tgApi.telegram.sendAnimation(
             tgChannelPublicLink,
             attachment.toJSON().url,
-            !textSent ? { caption: post.wall.text } : {},
+            !textSent ? { caption: convertVkLinks(post.wall.text) } : {},
           );
 
           const textHash = new Bun.CryptoHasher("md5");
@@ -186,7 +203,7 @@ export async function postToTelegram(post: any) {
           if (!textSent) {
             const msg = await tgApi.telegram.sendMessage(
               tgChannelPublicLink,
-              post.wall.text,
+              convertVkLinks(post.wall.text),
             );
           }
 
@@ -227,11 +244,11 @@ export async function postToTelegram(post: any) {
       // If no attachments
       const post_msg = await tgApi.telegram.sendMessage(
         tgChannelPublicLink,
-        post.wall.text,
+        convertVkLinks(post.wall.text),
       );
 
       const textHash = new Bun.CryptoHasher("md5");
-      textHash.update(post.wall.text);
+      textHash.update(convertVkLinks(post.wall.text));
 
       db.run(
         `INSERT INTO posts (
@@ -265,6 +282,7 @@ export async function postToTelegram(post: any) {
 }
 
 export async function replyToTelegram(reply: any) {
+  logger.debug(`vk reply context: ${JSON.stringify(reply)}`);
   try {
     const post: Post = db
       .query("SELECT discussion_tg_id FROM posts WHERE vk_id = ?")
@@ -288,7 +306,7 @@ export async function replyToTelegram(reply: any) {
         return;
       }
 
-      const mdText = escapeMarkdown(reply.toJSON().text);
+      const mdText = escapeMarkdown(convertVkLinks(reply.toJSON().text));
 
       // Check for attachments
       if (reply.attachments.toString().length > 0) {
@@ -512,7 +530,7 @@ export async function replyToTelegram(reply: any) {
         return;
       }
 
-      const mdText = escapeMarkdown(reply.toJSON().text);
+      const mdText = escapeMarkdown(convertVkLinks(reply.toJSON().text));
 
       await tgApi.telegram.editMessageText(
         tgChatId,
