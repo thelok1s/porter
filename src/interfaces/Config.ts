@@ -21,5 +21,5 @@ export interface Config {
       match: string[],
     },
   },
-};
+}
 

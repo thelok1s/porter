@@ -7,24 +7,27 @@ import { Post } from "@/interfaces/Post";
 import { Reply } from "@/interfaces/Reply";
 import { InputMediaPhoto } from "telegraf/types";
 
-function escapeMarkdown(text: string): string {
-  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
-}
-
-function convertVkLinks(text: string): string {
-  // Convert [https://m.vk.com/username|Display Name] format
-  text = text.replace(/\[(https?:\/\/(?:m\.)?vk\.com\/[^|]+)\|([^\]]+)\]/g,
+function tgFormatConverter(text: string): string {
+  // Convert [vk.com/username | Display Name] format
+  let formattedText = text.replace(
+    /\[(https?:\/\/?vk\.com\/[^|]+)\|([^\]]+)]/g,
     (_, url, displayName) => {
-      return `[${escapeMarkdown(displayName)}](${url})`;
-    });
+      return `[${displayName.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&")}](${url})`;
+    },
+  );
 
   // Convert [id123456|Display Name] format
-  text = text.replace(/\[id(\d+)\|([^\]]+)\]/g,
+  formattedText = formattedText.replace(
+    /\[id(\d+)\|([^\]]+)]/g,
     (_, userId, displayName) => {
-      return `[${escapeMarkdown(displayName)}](https://vk.com/id${userId})`;
-    });
+      return `[${displayName.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&")}](https://vk.com/id${userId})`;
+    },
+  );
 
-  return text;
+  // Escape all Markdown special characters in the remaining text
+  formattedText = formattedText.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+
+  return formattedText;
 }
 
 export async function postToTelegram(post: any) {
@@ -69,7 +72,9 @@ export async function postToTelegram(post: any) {
 
       // Multiple photos
       if (photoUrls.length > 1) {
-        photoUrls[0].caption = convertVkLinks(post.wall.text);
+        photoUrls[0].caption = tgFormatConverter(post.wall.text);
+        photoUrls[0].parse_mode = "MarkdownV2";
+
         const post_msg = await tgApi.telegram.sendMediaGroup(
           tgChannelPublicLink,
           photoUrls,
@@ -81,7 +86,7 @@ export async function postToTelegram(post: any) {
         db.run(
           `INSERT INTO posts (
                    vk_id,
-                   vk_owner_id, 
+                   vk_owner_id,
                    tg_id,
                    discussion_tg_id,
                    tg_author_id,
@@ -108,7 +113,8 @@ export async function postToTelegram(post: any) {
           tgChannelPublicLink,
           photoUrls[0].media,
           {
-            caption: convertVkLinks(post.wall.text),
+            caption: tgFormatConverter(post.wall.text),
+            parse_mode: "MarkdownV2",
           },
         );
 
@@ -146,10 +152,24 @@ export async function postToTelegram(post: any) {
         if (
           Object.prototype.hasOwnProperty.call(attachment.toJSON(), "extension")
         ) {
+          const options = !textSent
+            ? {
+                caption: tgFormatConverter(post.wall.text),
+                parse_mode: "MarkdownV2",
+                link_preview_options: { is_disabled: true },
+              }
+            : {};
+
+          const caption = !textSent
+            ? tgFormatConverter(post.wall.text)
+            : undefined;
           const post_msg = await tgApi.telegram.sendAnimation(
             tgChannelPublicLink,
             attachment.toJSON().url,
-            !textSent ? { caption: convertVkLinks(post.wall.text) } : {},
+            {
+              caption: caption,
+              parse_mode: caption ? "MarkdownV2" : undefined,
+            },
           );
 
           const textHash = new Bun.CryptoHasher("md5");
@@ -203,7 +223,11 @@ export async function postToTelegram(post: any) {
           if (!textSent) {
             const msg = await tgApi.telegram.sendMessage(
               tgChannelPublicLink,
-              convertVkLinks(post.wall.text),
+              tgFormatConverter(post.wall.text),
+              {
+                parse_mode: "MarkdownV2",
+                link_preview_options: { is_disabled: true },
+              },
             );
           }
 
@@ -218,13 +242,13 @@ export async function postToTelegram(post: any) {
 
           db.run(
             `INSERT INTO posts (
-                   vk_id, 
-                   vk_owner_id, 
-                   tg_id, 
-                   discussion_tg_id, 
-                   tg_author_id, 
-                   created_at, 
-                   text_hash, 
+                   vk_id,
+                   vk_owner_id,
+                   tg_id,
+                   discussion_tg_id,
+                   tg_author_id,
+                   created_at,
+                   text_hash,
                    attachments
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
@@ -244,19 +268,23 @@ export async function postToTelegram(post: any) {
       // If no attachments
       const post_msg = await tgApi.telegram.sendMessage(
         tgChannelPublicLink,
-        convertVkLinks(post.wall.text),
+        tgFormatConverter(post.wall.text),
+        {
+          parse_mode: "MarkdownV2",
+          link_preview_options: { is_disabled: true },
+        },
       );
 
       const textHash = new Bun.CryptoHasher("md5");
-      textHash.update(convertVkLinks(post.wall.text));
+      textHash.update(tgFormatConverter(post.wall.text));
 
       db.run(
         `INSERT INTO posts (
-            vk_id, 
+            vk_id,
             vk_owner_id,
             tg_id,
             discussion_tg_id,
-            tg_author_id, 
+            tg_author_id,
             created_at,
             text_hash,
             attachments
@@ -306,7 +334,7 @@ export async function replyToTelegram(reply: any) {
         return;
       }
 
-      const mdText = escapeMarkdown(convertVkLinks(reply.toJSON().text));
+      const formattedText = tgFormatConverter(reply.toJSON().text);
 
       // Check for attachments
       if (reply.attachments.toString().length > 0) {
@@ -337,7 +365,7 @@ export async function replyToTelegram(reply: any) {
               media: photo.media,
               ...(index === 0
                 ? {
-                    caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+                    caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${formattedText}`,
                     parse_mode: "MarkdownV2",
                   }
                 : {}),
@@ -389,7 +417,7 @@ export async function replyToTelegram(reply: any) {
             tgChatId,
             photoUrls[0].media,
             {
-              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${formattedText}`,
               parse_mode: "MarkdownV2",
               reply_parameters: {
                 chat_id: tgChatId,
@@ -437,7 +465,7 @@ export async function replyToTelegram(reply: any) {
             tgChatId,
             reply.attachments[0].toJSON().url,
             {
-              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${formattedText}`,
               reply_parameters: {
                 chat_id: tgChatId,
                 message_id: post.discussion_tg_id,
@@ -478,7 +506,7 @@ export async function replyToTelegram(reply: any) {
         // If no attachments
         const reply_msg = await tgApi.telegram.sendMessage(
           tgChatId,
-          `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+          `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${formattedText}`,
           {
             reply_parameters: {
               chat_id: tgChatId,
@@ -530,13 +558,13 @@ export async function replyToTelegram(reply: any) {
         return;
       }
 
-      const mdText = escapeMarkdown(convertVkLinks(reply.toJSON().text));
+      const formattedText = tgFormatConverter(reply.toJSON().text);
 
       await tgApi.telegram.editMessageText(
         tgChatId,
         replyRecord.tg_reply_id,
         undefined,
-        `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+        `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${formattedText}`,
         {
           parse_mode: "MarkdownV2",
           link_preview_options: { is_disabled: true },

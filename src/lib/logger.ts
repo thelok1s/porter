@@ -1,5 +1,4 @@
 import pino from "pino";
-import { Config } from "@/interfaces/Config";
 import PorterConfig from "../../porter.config";
 const config = PorterConfig;
 
