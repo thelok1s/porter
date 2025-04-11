@@ -5,10 +5,70 @@ import { tgApi, tgChannelPublicLink, tgChatId, vkGlobalApi } from "@/lib/api";
 import { getVkLink } from "@/lib/vkontakte";
 import { Post } from "@/interfaces/Post";
 import { Reply } from "@/interfaces/Reply";
-import { InputMediaPhoto } from "telegraf/types";
+import { InputMediaPhoto, Message } from "telegraf/types";
 
-function escapeMarkdown(text: string): string {
-  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+function splitText(text: string, maxLength: number = 4096): string[] {
+  if (!text || text.length <= maxLength) {
+    return [text];
+  }
+
+  // find a paragraph break
+  let splitPoint = text.lastIndexOf("\n\n", maxLength);
+  if (splitPoint === -1 || splitPoint < maxLength * 0.8) {
+    splitPoint = text.lastIndexOf("\n", maxLength);
+  }
+  if (splitPoint === -1 || splitPoint < maxLength * 0.8) {
+    // try a sentence
+    splitPoint = text.lastIndexOf(". ", maxLength);
+  }
+  if (splitPoint === -1 || splitPoint < maxLength * 0.8) {
+    // split at max length
+    splitPoint = maxLength;
+  }
+
+  const firstPart = text.substring(0, splitPoint).trim();
+  const remainingPart = text.substring(splitPoint).trim();
+
+  return [firstPart, ...splitText(remainingPart, maxLength)];
+}
+
+function convertVkLinksToHtml(text: string): string {
+  if (!text) return "";
+
+  const linkPattern = /\[(?<url>[^[|]+)\|(?<title>[^\]]+)]/g;
+  const vkIdPattern = /^(id|club)\d+$/;
+  const vkLinkPattern =
+    /^(https?:\/\/)?(m\.)?vk\.com(\/[\w\-.~:/?#[\]@&()*+,;%="ёЁа-яА-Я]*)?$/;
+
+  const safeText = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  return safeText.replace(linkPattern, (_match, url, title) => {
+    if (vkIdPattern.test(url)) {
+      url = `https://vk.com/${url}`;
+    }
+
+    if (vkLinkPattern.test(url)) {
+      return `<a href="${url}">${title}</a>`;
+    }
+
+    return `[${url}|${title}]`;
+  });
+}
+
+function getHtmlLink(url: string, text: string): string {
+  return `<a href="${url}">${text}</a>`;
+}
+
+function formatMessageText(text: string, useHtml: boolean = true): string {
+  if (!text) return "";
+  if (useHtml) {
+    return convertVkLinksToHtml(text);
+  } else {
+    return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+  }
 }
 
 export async function postToTelegram(post: any) {
@@ -19,6 +79,7 @@ export async function postToTelegram(post: any) {
     );
     return;
   }
+
   // Check if duplicate
   if (db.query("SELECT * FROM posts WHERE vk_id = ?").get(post.wall.id)) {
     logger.warn(
@@ -28,8 +89,14 @@ export async function postToTelegram(post: any) {
   }
 
   try {
+    // HTML formatting
+    const processedText = formatMessageText(post.wall.text);
+
+    // Split text if it's too long
+    const textParts = splitText(processedText);
+
     // Check for attachments
-    if (post.wall.attachments.toString().length > 0) {
+    if (post.wall.attachments.length > 0) {
       let textSent = false;
       const photoUrls = [];
 
@@ -52,26 +119,55 @@ export async function postToTelegram(post: any) {
 
       // Multiple photos
       if (photoUrls.length > 1) {
-        photoUrls[0].caption = post.wall.text;
-        const post_msg = await tgApi.telegram.sendMediaGroup(
-          tgChannelPublicLink,
-          photoUrls,
-        );
+        // If text is too long, send it as a separate message
+        let post_msg:
+          | (
+              | Message.DocumentMessage
+              | Message.AudioMessage
+              | Message.PhotoMessage
+              | Message.VideoMessage
+            )[]
+          | { from: { id: any } }[];
+
+        if (textParts.length > 1 || textParts[0].length > 1024) {
+          let mainMsgId = null;
+          for (const part of textParts) {
+            const msgResult = await tgApi.telegram.sendMessage(
+              tgChannelPublicLink,
+              part,
+              { parse_mode: "HTML" },
+            );
+            if (!mainMsgId) mainMsgId = msgResult.message_id;
+          }
+
+          post_msg = await tgApi.telegram.sendMediaGroup(
+            tgChannelPublicLink,
+            photoUrls,
+          );
+        } else {
+          // Text fits in caption
+          photoUrls[0].caption = textParts[0];
+          photoUrls[0].parse_mode = "HTML";
+          post_msg = await tgApi.telegram.sendMediaGroup(
+            tgChannelPublicLink,
+            photoUrls,
+          );
+        }
 
         const textHash = new Bun.CryptoHasher("md5");
         textHash.update(post.wall.text);
 
         db.run(
           `INSERT INTO posts (
-                   vk_id,
-                   vk_owner_id, 
-                   tg_id,
-                   discussion_tg_id,
-                   tg_author_id,
-                   created_at,
-                   text_hash,
-                   attachments
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                 vk_id,
+                 vk_owner_id,
+                 tg_id,
+                 discussion_tg_id,
+                 tg_author_id,
+                 created_at,
+                 text_hash,
+                 attachments
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             post.wall.id,
             post.wall.ownerId,
@@ -87,13 +183,34 @@ export async function postToTelegram(post: any) {
 
         // One photo
       } else if (photoUrls.length === 1) {
-        const post_msg = await tgApi.telegram.sendPhoto(
-          tgChannelPublicLink,
-          photoUrls[0].media,
-          {
-            caption: post.wall.text,
-          },
-        );
+        let post_msg: Message.PhotoMessage;
+
+        if (textParts.length > 1 || textParts[0].length > 1024) {
+          // Send text as separate message
+          let mainMsgId = null;
+          for (const part of textParts) {
+            const msgResult = await tgApi.telegram.sendMessage(
+              tgChannelPublicLink,
+              part,
+              { parse_mode: "HTML" },
+            );
+            if (!mainMsgId) mainMsgId = msgResult.message_id;
+          }
+
+          post_msg = await tgApi.telegram.sendPhoto(
+            tgChannelPublicLink,
+            photoUrls[0].media,
+          );
+        } else {
+          post_msg = await tgApi.telegram.sendPhoto(
+            tgChannelPublicLink,
+            photoUrls[0].media,
+            {
+              caption: textParts[0],
+              parse_mode: "HTML",
+            },
+          );
+        }
 
         const textHash = new Bun.CryptoHasher("md5");
         textHash.update(post.wall.text);
@@ -129,10 +246,97 @@ export async function postToTelegram(post: any) {
         if (
           Object.prototype.hasOwnProperty.call(attachment.toJSON(), "extension")
         ) {
-          const post_msg = await tgApi.telegram.sendAnimation(
+          let post_msg: Message.AnimationMessage;
+
+          if (!textSent) {
+            if (textParts.length > 1 || textParts[0].length > 1024) {
+              let mainMsgId = null;
+              for (const part of textParts) {
+                const msgResult = await tgApi.telegram.sendMessage(
+                  tgChannelPublicLink,
+                  part,
+                  { parse_mode: "HTML" },
+                );
+                if (!mainMsgId) mainMsgId = msgResult.message_id;
+              }
+
+              post_msg = await tgApi.telegram.sendAnimation(
+                tgChannelPublicLink,
+                attachment.toJSON().url,
+              );
+            } else {
+              post_msg = await tgApi.telegram.sendAnimation(
+                tgChannelPublicLink,
+                attachment.toJSON().url,
+                {
+                  caption: textParts[0],
+                  parse_mode: "HTML",
+                },
+              );
+            }
+
+            const textHash = new Bun.CryptoHasher("md5");
+            textHash.update(post.wall.text);
+
+            db.run(
+              `INSERT INTO posts (
+                   vk_id,
+                   vk_owner_id,
+                   tg_id,
+                   discussion_tg_id,
+                   tg_author_id,
+                   created_at,
+                   text_hash,
+                   attachments
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                post.wall.id,
+                post.wall.ownerId,
+                post_msg.message_id,
+                null,
+                JSON.stringify(post_msg.from.id),
+                post.wall.createdAt,
+                textHash.digest("base64"),
+                JSON.stringify(post.wall.attachments),
+              ],
+            );
+            textSent = true;
+          }
+        }
+
+        if (
+          Object.prototype.hasOwnProperty.call(attachment.toJSON(), "genreId")
+        ) {
+          logger.warn("Audio detected: it will not be processed");
+        }
+
+        if (
+          Object.prototype.hasOwnProperty.call(
+            attachment.toJSON(),
+            "question",
+          ) &&
+          !config.crossposting.parameters.ignorePolls
+        ) {
+          const pollOptions: string[] = attachment.answers.map(
+            (answer: { text: any }) => answer.text,
+          );
+
+          if (!textSent) {
+            let mainMsgId = null;
+            for (const part of textParts) {
+              const msgResult = await tgApi.telegram.sendMessage(
+                tgChannelPublicLink,
+                part,
+                { parse_mode: "HTML" },
+              );
+              if (!mainMsgId) mainMsgId = msgResult.message_id;
+            }
+          }
+
+          const post_msg = await tgApi.telegram.sendPoll(
             tgChannelPublicLink,
-            attachment.toJSON().url,
-            !textSent ? { caption: post.wall.text } : {},
+            attachment.question,
+            pollOptions,
           );
 
           const textHash = new Bun.CryptoHasher("md5");
@@ -160,86 +364,32 @@ export async function postToTelegram(post: any) {
               JSON.stringify(post.wall.attachments),
             ],
           );
-          textSent = true;
-        }
-
-        // Audio
-        if (
-          Object.prototype.hasOwnProperty.call(attachment.toJSON(), "genreId")
-        ) {
-          logger.warn("Audio detected: it will not be processed");
-          // TODO: Audio support (audio.get)
-        }
-
-        // Polls
-        if (
-          Object.prototype.hasOwnProperty.call(
-            attachment.toJSON(),
-            "question",
-          ) &&
-          !config.crossposting.parameters.ignorePolls
-        ) {
-          const pollOptions: string[] = attachment.answers.map(
-            (answer) => answer.text,
-          );
-
-          if (!textSent) {
-            const msg = await tgApi.telegram.sendMessage(
-              tgChannelPublicLink,
-              post.wall.text,
-            );
-          }
-
-          const post_msg = await tgApi.telegram.sendPoll(
-            tgChannelPublicLink,
-            attachment.question,
-            pollOptions,
-          );
-
-          const textHash = new Bun.CryptoHasher("md5");
-          textHash.update(post.wall.text);
-
-          db.run(
-            `INSERT INTO posts (
-                   vk_id, 
-                   vk_owner_id, 
-                   tg_id, 
-                   discussion_tg_id, 
-                   tg_author_id, 
-                   created_at, 
-                   text_hash, 
-                   attachments
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              post.wall.id,
-              post.wall.ownerId,
-              post_msg.message_id,
-              null,
-              JSON.stringify(post_msg.from.id),
-              post.wall.createdAt,
-              textHash.digest("base64"),
-              JSON.stringify(post.wall.attachments),
-            ],
-          );
         }
       }
     } else {
-      // If no attachments
-      const post_msg = await tgApi.telegram.sendMessage(
-        tgChannelPublicLink,
-        post.wall.text,
-      );
+      let mainMsgId = null;
+      let post_msg: Message.TextMessage;
+
+      for (const [index, part] of textParts.entries()) {
+        post_msg = await tgApi.telegram.sendMessage(tgChannelPublicLink, part, {
+          parse_mode: "HTML",
+        });
+
+        if (index === 0) {
+          mainMsgId = post_msg.message_id;
+        }
+      }
 
       const textHash = new Bun.CryptoHasher("md5");
       textHash.update(post.wall.text);
 
       db.run(
         `INSERT INTO posts (
-            vk_id, 
+            vk_id,
             vk_owner_id,
             tg_id,
             discussion_tg_id,
-            tg_author_id, 
+            tg_author_id,
             created_at,
             text_hash,
             attachments
@@ -247,7 +397,7 @@ export async function postToTelegram(post: any) {
         [
           post.wall.id,
           post.wall.ownerId,
-          post_msg.message_id,
+          mainMsgId,
           null,
           JSON.stringify(post_msg.from.id),
           post.wall.createdAt,
@@ -280,7 +430,6 @@ export async function replyToTelegram(reply: any) {
     });
 
     if (reply.isNew || reply.isRestore) {
-      // Prevent known duplicates
       if (
         db.query("SELECT * FROM replies WHERE vk_reply_id = ?").get(reply.id)
       ) {
@@ -288,7 +437,16 @@ export async function replyToTelegram(reply: any) {
         return;
       }
 
-      const mdText = escapeMarkdown(reply.toJSON().text);
+      //  HTML formatting
+      const processedText = formatMessageText(reply.toJSON().text);
+      const authorLink = getHtmlLink(
+        `https://www.vk.com/id${sender.id}`,
+        `${sender.first_name} ${sender.last_name}`,
+      );
+      const messageText = `${authorLink}: ${processedText}`;
+
+      // Split if needed
+      const textParts = splitText(messageText, 4096);
 
       // Check for attachments
       if (reply.attachments.toString().length > 0) {
@@ -313,29 +471,73 @@ export async function replyToTelegram(reply: any) {
 
         // Multiple photos
         if (photoUrls.length > 1) {
-          const mediaGroup: InputMediaPhoto[] = photoUrls.map(
-            (photo, index) => ({
-              type: "photo" as const,
-              media: photo.media,
-              ...(index === 0
-                ? {
-                    caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
-                    parse_mode: "MarkdownV2",
-                  }
-                : {}),
-            }),
-          );
+          let reply_msg:
+            | (
+                | Message.DocumentMessage
+                | Message.AudioMessage
+                | Message.PhotoMessage
+                | Message.VideoMessage
+              )[]
+            | { from: { id: any } }[];
 
-          const reply_msg = await tgApi.telegram.sendMediaGroup(
-            tgChatId,
-            mediaGroup,
-            {
-              reply_parameters: {
-                chat_id: tgChatId,
-                message_id: post.discussion_tg_id,
+          if (textParts.length > 1 || textParts[0].length > 1024) {
+            // Text is too long
+            let mainMsgId = null;
+            for (const [index, part] of textParts.entries()) {
+              const msgResult = await tgApi.telegram.sendMessage(
+                tgChatId,
+                part,
+                {
+                  parse_mode: "HTML",
+                  reply_parameters:
+                    index === 0
+                      ? {
+                          chat_id: tgChatId,
+                          message_id: post.discussion_tg_id,
+                        }
+                      : undefined,
+                  link_preview_options: { is_disabled: true },
+                },
+              );
+              if (!mainMsgId) mainMsgId = msgResult.message_id;
+            }
+
+            // send media
+            reply_msg = await tgApi.telegram.sendMediaGroup(
+              tgChatId,
+              photoUrls,
+              {
+                reply_parameters: {
+                  chat_id: tgChatId,
+                  message_id: mainMsgId,
+                },
               },
-            },
-          );
+            );
+          } else {
+            const mediaGroup: InputMediaPhoto[] = photoUrls.map(
+              (photo, index) => ({
+                type: "photo" as const,
+                media: photo.media,
+                ...(index === 0
+                  ? {
+                      caption: textParts[0],
+                      parse_mode: "HTML",
+                    }
+                  : {}),
+              }),
+            );
+
+            reply_msg = await tgApi.telegram.sendMediaGroup(
+              tgChatId,
+              mediaGroup,
+              {
+                reply_parameters: {
+                  chat_id: tgChatId,
+                  message_id: post.discussion_tg_id,
+                },
+              },
+            );
+          }
 
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(reply.text);
@@ -367,18 +569,55 @@ export async function replyToTelegram(reply: any) {
 
           // One photo
         } else if (photoUrls.length === 1) {
-          const reply_msg = await tgApi.telegram.sendPhoto(
-            tgChatId,
-            photoUrls[0].media,
-            {
-              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
-              parse_mode: "MarkdownV2",
-              reply_parameters: {
-                chat_id: tgChatId,
-                message_id: post.discussion_tg_id,
+          let reply_msg: Message.PhotoMessage;
+
+          if (textParts.length > 1 || textParts[0].length > 1024) {
+            // Send text as separate message
+            let mainMsgId = null;
+            for (const [index, part] of textParts.entries()) {
+              const msgResult = await tgApi.telegram.sendMessage(
+                tgChatId,
+                part,
+                {
+                  parse_mode: "HTML",
+                  reply_parameters:
+                    index === 0
+                      ? {
+                          chat_id: tgChatId,
+                          message_id: post.discussion_tg_id,
+                        }
+                      : undefined,
+                  link_preview_options: { is_disabled: true },
+                },
+              );
+              if (!mainMsgId) mainMsgId = msgResult.message_id;
+            }
+
+            reply_msg = await tgApi.telegram.sendPhoto(
+              tgChatId,
+              photoUrls[0].media,
+              {
+                reply_parameters: {
+                  chat_id: tgChatId,
+                  message_id: mainMsgId,
+                },
               },
-            },
-          );
+            );
+          } else {
+            // Text fits in limit
+            reply_msg = await tgApi.telegram.sendPhoto(
+              tgChatId,
+              photoUrls[0].media,
+              {
+                caption: textParts[0],
+                parse_mode: "HTML",
+                reply_parameters: {
+                  chat_id: tgChatId,
+                  message_id: post.discussion_tg_id,
+                },
+              },
+            );
+          }
 
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(reply.text);
@@ -415,18 +654,55 @@ export async function replyToTelegram(reply: any) {
             "extension",
           )
         ) {
-          const reply_msg = await tgApi.telegram.sendAnimation(
-            tgChatId,
-            reply.attachments[0].toJSON().url,
-            {
-              caption: `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
-              reply_parameters: {
-                chat_id: tgChatId,
-                message_id: post.discussion_tg_id,
+          let reply_msg: Message.AnimationMessage;
+
+          if (textParts.length > 1 || textParts[0].length > 1024) {
+            // Send text as separate message
+            let mainMsgId = null;
+            for (const [index, part] of textParts.entries()) {
+              const msgResult = await tgApi.telegram.sendMessage(
+                tgChatId,
+                part,
+                {
+                  parse_mode: "HTML",
+                  reply_parameters:
+                    index === 0
+                      ? {
+                          chat_id: tgChatId,
+                          message_id: post.discussion_tg_id,
+                        }
+                      : undefined,
+                  link_preview_options: { is_disabled: true },
+                },
+              );
+              if (!mainMsgId) mainMsgId = msgResult.message_id;
+            }
+
+            reply_msg = await tgApi.telegram.sendAnimation(
+              tgChatId,
+              reply.attachments[0].toJSON().url,
+              {
+                reply_parameters: {
+                  chat_id: tgChatId,
+                  message_id: mainMsgId,
+                },
               },
-              parse_mode: "MarkdownV2",
-            },
-          );
+            );
+          } else {
+            // Text fits in caption
+            reply_msg = await tgApi.telegram.sendAnimation(
+              tgChatId,
+              reply.attachments[0].toJSON().url,
+              {
+                caption: textParts[0],
+                parse_mode: "HTML",
+                reply_parameters: {
+                  chat_id: tgChatId,
+                  message_id: post.discussion_tg_id,
+                },
+              },
+            );
+          }
 
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(reply.text);
@@ -457,19 +733,26 @@ export async function replyToTelegram(reply: any) {
           );
         }
       } else {
-        // If no attachments
-        const reply_msg = await tgApi.telegram.sendMessage(
-          tgChatId,
-          `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
-          {
-            reply_parameters: {
-              chat_id: tgChatId,
-              message_id: post.discussion_tg_id,
-            },
-            parse_mode: "MarkdownV2",
+        let mainMsgId = null;
+        let reply_msg: Message.TextMessage;
+
+        for (const [index, part] of textParts.entries()) {
+          reply_msg = await tgApi.telegram.sendMessage(tgChatId, part, {
+            parse_mode: "HTML",
+            reply_parameters:
+              index === 0
+                ? {
+                    chat_id: tgChatId,
+                    message_id: post.discussion_tg_id,
+                  }
+                : undefined,
             link_preview_options: { is_disabled: true },
-          },
-        );
+          });
+
+          if (index === 0) {
+            mainMsgId = reply_msg.message_id;
+          }
+        }
 
         const textHash = new Bun.CryptoHasher("md5");
         textHash.update(reply.text);
@@ -490,7 +773,7 @@ export async function replyToTelegram(reply: any) {
             reply.objectId,
             reply.id,
             reply.ownerId,
-            reply_msg.message_id,
+            mainMsgId,
             post.discussion_tg_id,
             reply_msg.from.id,
             reply.toJSON().createdAt,
@@ -499,7 +782,7 @@ export async function replyToTelegram(reply: any) {
           ],
         );
         logger.info(
-          `[VK –> TG] Reply ported: ${reply.id} (for msg: ${reply_msg.message_id})`,
+          `[VK –> TG] Reply ported: ${reply.id} (for msg: ${mainMsgId})`,
         );
       }
     } else if (reply.isEdit) {
@@ -512,15 +795,21 @@ export async function replyToTelegram(reply: any) {
         return;
       }
 
-      const mdText = escapeMarkdown(reply.toJSON().text);
+      // Process the reply text with HTML formatting
+      const processedText = formatMessageText(reply.toJSON().text);
+      const authorLink = getHtmlLink(
+        `https://www.vk.com/id${sender.id}`,
+        `${sender.first_name} ${sender.last_name}`,
+      );
+      const messageText = `${authorLink}: ${processedText}`;
 
       await tgApi.telegram.editMessageText(
         tgChatId,
         replyRecord.tg_reply_id,
         undefined,
-        `[${sender.first_name} ${sender.last_name}](https://www.vk.com/id${sender.id}): ${mdText}`,
+        messageText,
         {
-          parse_mode: "MarkdownV2",
+          parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
         },
       );
@@ -531,6 +820,8 @@ export async function replyToTelegram(reply: any) {
         textHash.digest("base64"),
         reply.id,
       ]);
+
+      logger.info(`[VK –> TG] Reply edited: ${reply.id}`);
     } else if (reply.isDelete) {
       const replyRecord: Reply = db
         .query("SELECT tg_reply_id FROM replies WHERE vk_reply_id = ?")
@@ -543,6 +834,8 @@ export async function replyToTelegram(reply: any) {
 
       await tgApi.telegram.deleteMessage(tgChatId, replyRecord.tg_reply_id);
       db.run("DELETE FROM replies WHERE vk_reply_id = ?", [reply.id]);
+
+      logger.info(`[VK –> TG] Reply deleted: ${reply.id}`);
     }
   } catch (error) {
     logger.error(`Error handling reply ${reply?.id}: ${error}`);
