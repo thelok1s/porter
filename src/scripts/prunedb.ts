@@ -1,7 +1,13 @@
-import { Database } from "bun:sqlite";
+import { sequelize } from "@/lib/sequelize";
 
-const db = new Database("./src/lib/persistence.sqlite");
-db.run('DROP TABLE IF EXISTS posts');
-db.run('DROP TABLE IF EXISTS replies');
-console.log('Complete')
-db.close()
+async function main() {
+  await sequelize.query("DROP TABLE IF EXISTS posts");
+  await sequelize.query("DROP TABLE IF EXISTS replies");
+  console.log("Complete");
+  await sequelize.close();
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

@@ -1,6 +1,7 @@
 import logger from "@/lib/logger";
-import { db } from "@/db/database";
-import { Post } from "@/interfaces/Post";
+import { Post as PostModel } from "@/models/post.schema";
+
+import { Post } from "@/types/Post";
 import { Telegraf } from "telegraf";
 import { API } from "vk-io";
 
@@ -23,9 +24,11 @@ export async function syncRecentPosts(
 ) {
   try {
     // under construction, ai generated
-    const recentPosts: Post[] = db
-      .query("SELECT * FROM posts ORDER BY created_at DESC LIMIT 5")
-      .all() as Post[];
+    const recentPosts = (await PostModel.findAll({
+      order: [["created_at", "DESC"]],
+      limit: 5,
+      raw: true,
+    })) as unknown as Post[];
 
     for (const post of recentPosts) {
       try {
@@ -33,10 +36,10 @@ export async function syncRecentPosts(
           posts: `${post.vk_owner_id}_${post.vk_id}`,
         });
       } catch (error) {
-        logger.error(`Failed to check VK post ${post.vk_id}:`, error);
+        logger.error(`Failed to check VK post ${post.vk_id}: ${error}`);
       }
     }
   } catch (error) {
-    logger.error("Failed to sync recent posts:", error);
+    logger.error("Failed to sync recent posts: ${error}");
   }
 }

@@ -11,6 +11,8 @@ logs/*
 *.log
 npm-debug.log*
 *.sqlite
+*.sqlite3
+*.sql
 
 # Environment variables
 .env

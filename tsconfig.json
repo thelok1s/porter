@@ -3,7 +3,7 @@
     "types": ["bun-types"],
     "target": "ES2023",
     "module": "commonjs",
-    "strict": false,
+    "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "paths": {

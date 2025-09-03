@@ -1,10 +1,18 @@
 import config from "../../porter.config";
 import logger from "@/lib/logger";
-import { db } from "@/db/database";
-import { tgApi, tgChannelPublicLink, tgChatId, vkGlobalApi } from "@/lib/api";
-import { getVkLink } from "@/lib/vkontakte";
-import { Post } from "@/interfaces/Post";
-import { Reply } from "@/interfaces/Reply";
+
+import {
+  tgApi,
+  tgChannelPublicLink as tgChannelPublicLinkRaw,
+  tgChatId as tgChatIdRaw,
+  vkGlobalApi,
+} from "@/core/api";
+import { getVkLink } from "@/core/vkontakte";
+const tgChannelPublicLink = String(tgChannelPublicLinkRaw ?? "");
+const tgChatId = String(tgChatIdRaw ?? "");
+
+import { Post } from "@/models/post.schema";
+import { Reply as ReplyModel } from "@/models/reply.schema";
 import { InputMediaPhoto, Message } from "telegraf/types";
 
 function splitText(text: string, maxLength: number = 4096): string[] {
@@ -108,7 +116,11 @@ export async function postToTelegram(post: any) {
   }
 
   // Check if duplicate
-  if (db.query("SELECT * FROM posts WHERE vk_id = ?").get(post.wall.id)) {
+  const exists = await Post.findOne({
+    where: { vk_id: post.wall.id },
+    attributes: ["id"],
+  });
+  if (exists) {
     logger.warn(
       `Already ported post (${getVkLink(post.wall.id, post.wall.ownerId)})`,
     );
@@ -125,7 +137,7 @@ export async function postToTelegram(post: any) {
     // Check for attachments
     if (post.wall.attachments.length > 0) {
       let textSent = false;
-      const photoUrls = [];
+      const photoUrls: InputMediaPhoto[] = [];
 
       for (const attachment of post.wall.attachments) {
         if (
@@ -175,37 +187,27 @@ export async function postToTelegram(post: any) {
           // Text fits in caption
           photoUrls[0].caption = textParts[0];
           photoUrls[0].parse_mode = "HTML";
-          post_msg = await tgApi.telegram.sendMediaGroup(
+          post_msg = (await tgApi.telegram.sendMediaGroup(
             tgChannelPublicLink,
             photoUrls,
-          );
+          )) as any[];
         }
 
         const textHash = new Bun.CryptoHasher("md5");
         textHash.update(post.wall.text);
 
-        db.run(
-          `INSERT INTO posts (
-                 vk_id,
-                 vk_owner_id,
-                 tg_id,
-                 discussion_tg_id,
-                 tg_author_id,
-                 created_at,
-                 text_hash,
-                 attachments
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            post.wall.id,
-            post.wall.ownerId,
-            post_msg[0].message_id,
-            null,
-            JSON.stringify(post_msg[0].from.id),
-            post.wall.createdAt,
-            textHash.digest("base64"),
-            JSON.stringify(post.wall.attachments),
-          ],
-        );
+        await Post.create({
+          vk_id: post.wall.id,
+          vk_owner_id: post.wall.ownerId,
+          tg_id: (post_msg as any[])[0]?.message_id,
+          discussion_tg_id: null,
+          tg_author_id: JSON.stringify(
+            (post_msg as any[])[0]?.from?.id ?? null,
+          ),
+          created_at: post.wall.createdAt,
+          text_hash: textHash.digest("base64"),
+          attachments: JSON.stringify(post.wall.attachments),
+        });
         textSent = true;
 
         // One photo
@@ -242,28 +244,16 @@ export async function postToTelegram(post: any) {
         const textHash = new Bun.CryptoHasher("md5");
         textHash.update(post.wall.text);
 
-        db.run(
-          `INSERT INTO posts (
-            vk_id,
-            vk_owner_id,
-            tg_id,
-            discussion_tg_id,
-            tg_author_id,
-            created_at,
-            text_hash,
-            attachments
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            post.wall.id,
-            post.wall.ownerId,
-            post_msg.message_id,
-            null,
-            JSON.stringify(post_msg.from.id),
-            post.wall.createdAt,
-            textHash.digest("base64"),
-            JSON.stringify(post.wall.attachments),
-          ],
-        );
+        await Post.create({
+          vk_id: post.wall.id,
+          vk_owner_id: post.wall.ownerId,
+          tg_id: post_msg.message_id,
+          discussion_tg_id: null,
+          tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
+          created_at: post.wall.createdAt,
+          text_hash: textHash.digest("base64"),
+          attachments: JSON.stringify(post.wall.attachments),
+        });
         textSent = true;
       }
 
@@ -305,28 +295,16 @@ export async function postToTelegram(post: any) {
             const textHash = new Bun.CryptoHasher("md5");
             textHash.update(post.wall.text);
 
-            db.run(
-              `INSERT INTO posts (
-                   vk_id,
-                   vk_owner_id,
-                   tg_id,
-                   discussion_tg_id,
-                   tg_author_id,
-                   created_at,
-                   text_hash,
-                   attachments
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                post.wall.id,
-                post.wall.ownerId,
-                post_msg.message_id,
-                null,
-                JSON.stringify(post_msg.from.id),
-                post.wall.createdAt,
-                textHash.digest("base64"),
-                JSON.stringify(post.wall.attachments),
-              ],
-            );
+            await Post.create({
+              vk_id: post.wall.id,
+              vk_owner_id: post.wall.ownerId,
+              tg_id: post_msg.message_id,
+              discussion_tg_id: null,
+              tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
+              created_at: post.wall.createdAt,
+              text_hash: textHash.digest("base64"),
+              attachments: JSON.stringify(post.wall.attachments),
+            });
             textSent = true;
           }
         }
@@ -369,33 +347,21 @@ export async function postToTelegram(post: any) {
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(post.wall.text);
 
-          db.run(
-            `INSERT INTO posts (
-                   vk_id,
-                   vk_owner_id,
-                   tg_id,
-                   discussion_tg_id,
-                   tg_author_id,
-                   created_at,
-                   text_hash,
-                   attachments
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              post.wall.id,
-              post.wall.ownerId,
-              post_msg.message_id,
-              null,
-              JSON.stringify(post_msg.from.id),
-              post.wall.createdAt,
-              textHash.digest("base64"),
-              JSON.stringify(post.wall.attachments),
-            ],
-          );
+          await Post.create({
+            vk_id: post.wall.id,
+            vk_owner_id: post.wall.ownerId,
+            tg_id: post_msg.message_id,
+            discussion_tg_id: null,
+            tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
+            created_at: post.wall.createdAt,
+            text_hash: textHash.digest("base64"),
+            attachments: JSON.stringify(post.wall.attachments),
+          });
         }
       }
     } else {
       let mainMsgId = null;
-      let post_msg: Message.TextMessage;
+      let post_msg: Message.TextMessage | undefined;
 
       for (const [index, part] of textParts.entries()) {
         post_msg = await tgApi.telegram.sendMessage(tgChannelPublicLink, part, {
@@ -410,42 +376,31 @@ export async function postToTelegram(post: any) {
       const textHash = new Bun.CryptoHasher("md5");
       textHash.update(post.wall.text);
 
-      db.run(
-        `INSERT INTO posts (
-            vk_id,
-            vk_owner_id,
-            tg_id,
-            discussion_tg_id,
-            tg_author_id,
-            created_at,
-            text_hash,
-            attachments
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          post.wall.id,
-          post.wall.ownerId,
-          mainMsgId,
-          null,
-          JSON.stringify(post_msg.from.id),
-          post.wall.createdAt,
-          textHash.digest("base64"),
-          JSON.stringify(post.wall.attachments),
-        ],
-      );
+      await Post.create({
+        vk_id: post.wall.id,
+        vk_owner_id: post.wall.ownerId,
+        tg_id: mainMsgId as number,
+        discussion_tg_id: null,
+        tg_author_id: JSON.stringify(post_msg?.from?.id ?? null),
+        created_at: post.wall.createdAt,
+        text_hash: textHash.digest("base64"),
+        attachments: JSON.stringify(post.wall.attachments),
+      });
     }
     logger.info(
       `[VK –> TG] Successfully ported: ${getVkLink(post.wall.id, post.wall.ownerId)}`,
     );
-  } catch (error) {
+  } catch (error: any) {
     logger.error(`[VK -/-> TG] Error while porting: ${error.message}`);
   }
 }
 
 export async function replyToTelegram(reply: any) {
   try {
-    const post: Post = db
-      .query("SELECT discussion_tg_id FROM posts WHERE vk_id = ?")
-      .get(reply.objectId) as Post;
+    const post = await Post.findOne({
+      where: { vk_id: reply.objectId },
+      attributes: ["discussion_tg_id"],
+    });
 
     if (!post?.discussion_tg_id) {
       logger.warn(`Discussion not found for msg id: ${reply.objectId}`);
@@ -457,9 +412,11 @@ export async function replyToTelegram(reply: any) {
     });
 
     if (reply.isNew || reply.isRestore) {
-      if (
-        db.query("SELECT * FROM replies WHERE vk_reply_id = ?").get(reply.id)
-      ) {
+      const existingReply = await ReplyModel.findOne({
+        where: { vk_reply_id: reply.id },
+        attributes: ["id"],
+      });
+      if (existingReply) {
         logger.warn(`Reply already ported: ${reply.id} `);
         return;
       }
@@ -477,7 +434,7 @@ export async function replyToTelegram(reply: any) {
 
       // Check for attachments
       if (reply.attachments.toString().length > 0) {
-        const photoUrls = [];
+        const photoUrls: InputMediaPhoto[] = [];
 
         for (const attachment of reply.attachments) {
           if (
@@ -530,16 +487,16 @@ export async function replyToTelegram(reply: any) {
             }
 
             // send media
-            reply_msg = await tgApi.telegram.sendMediaGroup(
+            reply_msg = (await tgApi.telegram.sendMediaGroup(
               tgChatId,
               photoUrls,
               {
                 reply_parameters: {
                   chat_id: tgChatId,
-                  message_id: mainMsgId,
+                  message_id: mainMsgId as any,
                 },
               },
-            );
+            )) as any[];
           } else {
             const mediaGroup: InputMediaPhoto[] = photoUrls.map(
               (photo, index) => ({
@@ -554,7 +511,7 @@ export async function replyToTelegram(reply: any) {
               }),
             );
 
-            reply_msg = await tgApi.telegram.sendMediaGroup(
+            reply_msg = (await tgApi.telegram.sendMediaGroup(
               tgChatId,
               mediaGroup,
               {
@@ -563,36 +520,23 @@ export async function replyToTelegram(reply: any) {
                   message_id: post.discussion_tg_id,
                 },
               },
-            );
+            )) as any[];
           }
 
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(reply.text);
 
-          db.run(
-            `INSERT INTO replies (
-            vk_post_id,
-            vk_reply_id,
-            vk_owner_id,
-            tg_reply_id,
-            discussion_tg_id,
-            tg_author_id,
-            created_at,
-            text_hash,
-            attachments
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              reply.objectId,
-              reply.id,
-              reply.ownerId,
-              reply_msg[0].message_id,
-              post.discussion_tg_id,
-              reply_msg[0].from.id,
-              reply.toJSON().createdAt,
-              textHash.digest("base64"),
-              JSON.stringify(reply.toJSON().attachments),
-            ],
-          );
+          await ReplyModel.create({
+            vk_post_id: reply.objectId,
+            vk_reply_id: reply.id,
+            vk_owner_id: reply.ownerId,
+            tg_reply_id: (reply_msg as any[])[0]?.message_id,
+            discussion_tg_id: post.discussion_tg_id,
+            tg_author_id: (reply_msg as any[])[0]?.from?.id ?? null,
+            created_at: reply.toJSON().createdAt,
+            text_hash: textHash.digest("base64"),
+            attachments: JSON.stringify(reply.toJSON().attachments),
+          });
 
           // One photo
         } else if (photoUrls.length === 1) {
@@ -626,7 +570,7 @@ export async function replyToTelegram(reply: any) {
               {
                 reply_parameters: {
                   chat_id: tgChatId,
-                  message_id: mainMsgId,
+                  message_id: Number(mainMsgId),
                 },
               },
             );
@@ -649,30 +593,17 @@ export async function replyToTelegram(reply: any) {
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(reply.text);
 
-          db.run(
-            `INSERT INTO replies (
-            vk_post_id,
-            vk_reply_id,
-            vk_owner_id,
-            tg_reply_id,
-            discussion_tg_id,
-            tg_author_id,
-            created_at,
-            text_hash,
-            attachments
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              reply.objectId,
-              reply.id,
-              reply.ownerId,
-              reply_msg.message_id,
-              post.discussion_tg_id,
-              reply_msg.from.id,
-              reply.toJSON().createdAt,
-              textHash.digest("base64"),
-              JSON.stringify(reply.toJSON().attachments),
-            ],
-          );
+          await ReplyModel.create({
+            vk_post_id: reply.objectId,
+            vk_reply_id: reply.id,
+            vk_owner_id: reply.ownerId,
+            tg_reply_id: reply_msg.message_id,
+            discussion_tg_id: post.discussion_tg_id,
+            tg_author_id: reply_msg?.from?.id ?? null,
+            created_at: reply.toJSON().createdAt,
+            text_hash: textHash.digest("base64"),
+            attachments: JSON.stringify(reply.toJSON().attachments),
+          });
 
           // File (GIF specifically)
         } else if (
@@ -711,7 +642,7 @@ export async function replyToTelegram(reply: any) {
               {
                 reply_parameters: {
                   chat_id: tgChatId,
-                  message_id: mainMsgId,
+                  message_id: Number(mainMsgId),
                 },
               },
             );
@@ -725,7 +656,7 @@ export async function replyToTelegram(reply: any) {
                 parse_mode: "HTML",
                 reply_parameters: {
                   chat_id: tgChatId,
-                  message_id: post.discussion_tg_id,
+                  message_id: Number(post.discussion_tg_id),
                 },
               },
             );
@@ -734,34 +665,21 @@ export async function replyToTelegram(reply: any) {
           const textHash = new Bun.CryptoHasher("md5");
           textHash.update(reply.text);
 
-          db.run(
-            `INSERT INTO replies (
-                vk_post_id,
-                vk_reply_id,
-                vk_owner_id,
-                tg_reply_id,
-                discussion_tg_id,
-                tg_author_id,
-                created_at,
-                text_hash,
-                attachments
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              reply.objectId,
-              reply.id,
-              reply.ownerId,
-              reply_msg.message_id,
-              post.discussion_tg_id,
-              reply_msg.from.id,
-              reply.toJSON().createdAt,
-              textHash.digest("base64"),
-              JSON.stringify(reply.toJSON().attachments),
-            ],
-          );
+          await ReplyModel.create({
+            vk_post_id: reply.objectId,
+            vk_reply_id: reply.id,
+            vk_owner_id: reply.ownerId,
+            tg_reply_id: reply_msg.message_id,
+            discussion_tg_id: post.discussion_tg_id,
+            tg_author_id: reply_msg?.from?.id ?? null,
+            created_at: reply.toJSON().createdAt,
+            text_hash: textHash.digest("base64"),
+            attachments: JSON.stringify(reply.toJSON().attachments),
+          });
         }
       } else {
         let mainMsgId = null;
-        let reply_msg: Message.TextMessage;
+        let reply_msg: Message.TextMessage | undefined;
 
         for (const [index, part] of textParts.entries()) {
           reply_msg = await tgApi.telegram.sendMessage(tgChatId, part, {
@@ -784,38 +702,26 @@ export async function replyToTelegram(reply: any) {
         const textHash = new Bun.CryptoHasher("md5");
         textHash.update(reply.text);
 
-        db.run(
-          `INSERT INTO replies (
-            vk_post_id,
-            vk_reply_id,
-            vk_owner_id,
-            tg_reply_id,
-            discussion_tg_id,
-            tg_author_id,
-            created_at,
-            text_hash,
-            attachments
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            reply.objectId,
-            reply.id,
-            reply.ownerId,
-            mainMsgId,
-            post.discussion_tg_id,
-            reply_msg.from.id,
-            reply.toJSON().createdAt,
-            textHash.digest("base64"),
-            JSON.stringify(reply.toJSON().attachments),
-          ],
-        );
+        await ReplyModel.create({
+          vk_post_id: reply.objectId,
+          vk_reply_id: reply.id,
+          vk_owner_id: reply.ownerId,
+          tg_reply_id: mainMsgId as number,
+          discussion_tg_id: post.discussion_tg_id,
+          tg_author_id: reply_msg?.from?.id ?? null,
+          created_at: reply.toJSON().createdAt,
+          text_hash: textHash.digest("base64"),
+          attachments: JSON.stringify(reply.toJSON().attachments),
+        });
         logger.info(
           `[VK –> TG] Reply ported: ${reply.id} (for msg: ${mainMsgId})`,
         );
       }
     } else if (reply.isEdit) {
-      const replyRecord: Reply = db
-        .query("SELECT tg_reply_id FROM replies WHERE vk_reply_id = ?")
-        .get(reply.id) as Reply;
+      const replyRecord = await ReplyModel.findOne({
+        where: { vk_reply_id: reply.id },
+        attributes: ["tg_reply_id"],
+      });
 
       if (!replyRecord?.tg_reply_id) {
         logger.error(`Cannot find reply to edit: ${reply.id}`);
@@ -843,16 +749,17 @@ export async function replyToTelegram(reply: any) {
 
       const textHash = new Bun.CryptoHasher("md5");
       textHash.update(reply.text);
-      db.run("UPDATE replies SET text_hash = ? WHERE vk_reply_id = ?", [
-        textHash.digest("base64"),
-        reply.id,
-      ]);
+      await ReplyModel.update(
+        { text_hash: textHash.digest("base64") },
+        { where: { vk_reply_id: reply.id } },
+      );
 
       logger.info(`[VK –> TG] Reply edited: ${reply.id}`);
     } else if (reply.isDelete) {
-      const replyRecord: Reply = db
-        .query("SELECT tg_reply_id FROM replies WHERE vk_reply_id = ?")
-        .get(reply.id) as Reply;
+      const replyRecord = await ReplyModel.findOne({
+        where: { vk_reply_id: reply.id },
+        attributes: ["tg_reply_id"],
+      });
 
       if (!replyRecord?.tg_reply_id) {
         logger.error(`Cannot find reply to delete: ${reply.id}`);
@@ -860,7 +767,9 @@ export async function replyToTelegram(reply: any) {
       }
 
       await tgApi.telegram.deleteMessage(tgChatId, replyRecord.tg_reply_id);
-      db.run("DELETE FROM replies WHERE vk_reply_id = ?", [reply.id]);
+      await ReplyModel.destroy({
+        where: { vk_reply_id: reply.id },
+      });
 
       logger.info(`[VK –> TG] Reply deleted: ${reply.id}`);
     }
