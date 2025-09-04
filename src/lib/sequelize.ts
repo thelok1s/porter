@@ -1,8 +1,17 @@
 import { Sequelize } from "sequelize";
+import fs from "fs";
+import path from "path";
+
+export const DB_FILE = process.env.DB_FILE
+  ? path.resolve(process.env.DB_FILE)
+  : path.resolve("./src/db/persistence.sqlite");
+
+// Ensure the directory for the SQLite file exists
+fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
 
 export const sequelize = new Sequelize({
   dialect: "sqlite",
-  storage: "../../database/persistence.sqlite",
+  storage: DB_FILE,
   logging: false,
 });
 

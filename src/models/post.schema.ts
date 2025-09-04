@@ -5,7 +5,7 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from "sequelize";
-import { sequelize } from "../lib/sequelize";
+import { sequelize } from "@/lib/sequelize";
 
 export class Post extends Model<
   InferAttributes<Post>,
@@ -13,7 +13,7 @@ export class Post extends Model<
 > {
   declare id: CreationOptional<number>;
   declare vk_id: number;
-  declare vk_owner_id: number | null;
+  declare vk_author_id: number | null;
   declare tg_id: number;
   declare discussion_tg_id: number | null;
   declare tg_author_id: string | null;
@@ -26,7 +26,7 @@ Post.init(
   {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     vk_id: { type: DataTypes.INTEGER, allowNull: false, unique: true },
-    vk_owner_id: { type: DataTypes.INTEGER, allowNull: true },
+    vk_author_id: { type: DataTypes.INTEGER, allowNull: true },
     tg_id: { type: DataTypes.INTEGER, allowNull: false, unique: true },
     discussion_tg_id: {
       type: DataTypes.INTEGER,

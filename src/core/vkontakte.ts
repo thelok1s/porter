@@ -33,7 +33,7 @@ export async function syncRecentPosts(
     for (const post of recentPosts) {
       try {
         const wallPost = await vkGlobalApi.wall.getById({
-          posts: `${post.vk_owner_id}_${post.vk_id}`,
+          posts: `${post.vk_author_id}_${post.vk_id}`,
         });
       } catch (error) {
         logger.error(`Failed to check VK post ${post.vk_id}: ${error}`);

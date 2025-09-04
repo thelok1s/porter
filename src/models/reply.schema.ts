@@ -15,7 +15,7 @@ export class Reply extends Model<
   declare id: CreationOptional<number>;
   declare vk_post_id: number | null; // references Post.vk_id (targetKey)
   declare vk_reply_id: number | null;
-  declare vk_owner_id: number | null;
+  declare vk_author_id: number | null;
   declare tg_reply_id: number | null;
   declare discussion_tg_id: number | null; // references Post.discussion_tg_id (targetKey)
   declare tg_author_id: number | null;
@@ -29,7 +29,7 @@ Reply.init(
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     vk_post_id: { type: DataTypes.INTEGER, allowNull: true },
     vk_reply_id: { type: DataTypes.INTEGER, allowNull: true, unique: true },
-    vk_owner_id: { type: DataTypes.INTEGER, allowNull: true },
+    vk_author_id: { type: DataTypes.INTEGER, allowNull: true },
     tg_reply_id: { type: DataTypes.INTEGER, allowNull: true, unique: true },
     discussion_tg_id: { type: DataTypes.INTEGER, allowNull: true },
     tg_author_id: { type: DataTypes.INTEGER, allowNull: true },

@@ -1,8 +1,7 @@
 import { sequelize } from "@/lib/sequelize";
 
 async function main() {
-  await sequelize.query("DROP TABLE IF EXISTS posts");
-  await sequelize.query("DROP TABLE IF EXISTS replies");
+  await sequelize.drop();
   console.log("Complete");
   await sequelize.close();
 }

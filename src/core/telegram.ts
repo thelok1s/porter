@@ -198,7 +198,7 @@ export async function postToTelegram(post: any) {
 
         await Post.create({
           vk_id: post.wall.id,
-          vk_owner_id: post.wall.ownerId,
+          vk_author_id: post.wall.ownerId,
           tg_id: (post_msg as any[])[0]?.message_id,
           discussion_tg_id: null,
           tg_author_id: JSON.stringify(
@@ -246,7 +246,7 @@ export async function postToTelegram(post: any) {
 
         await Post.create({
           vk_id: post.wall.id,
-          vk_owner_id: post.wall.ownerId,
+          vk_author_id: post.wall.ownerId,
           tg_id: post_msg.message_id,
           discussion_tg_id: null,
           tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
@@ -297,7 +297,7 @@ export async function postToTelegram(post: any) {
 
             await Post.create({
               vk_id: post.wall.id,
-              vk_owner_id: post.wall.ownerId,
+              vk_author_id: post.wall.ownerId,
               tg_id: post_msg.message_id,
               discussion_tg_id: null,
               tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
@@ -349,7 +349,7 @@ export async function postToTelegram(post: any) {
 
           await Post.create({
             vk_id: post.wall.id,
-            vk_owner_id: post.wall.ownerId,
+            vk_author_id: post.wall.ownerId,
             tg_id: post_msg.message_id,
             discussion_tg_id: null,
             tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
@@ -378,7 +378,7 @@ export async function postToTelegram(post: any) {
 
       await Post.create({
         vk_id: post.wall.id,
-        vk_owner_id: post.wall.ownerId,
+        vk_author_id: post.wall.ownerId,
         tg_id: mainMsgId as number,
         discussion_tg_id: null,
         tg_author_id: JSON.stringify(post_msg?.from?.id ?? null),
@@ -529,7 +529,7 @@ export async function replyToTelegram(reply: any) {
           await ReplyModel.create({
             vk_post_id: reply.objectId,
             vk_reply_id: reply.id,
-            vk_owner_id: reply.ownerId,
+            vk_author_id: reply.ownerId,
             tg_reply_id: (reply_msg as any[])[0]?.message_id,
             discussion_tg_id: post.discussion_tg_id,
             tg_author_id: (reply_msg as any[])[0]?.from?.id ?? null,
@@ -596,7 +596,7 @@ export async function replyToTelegram(reply: any) {
           await ReplyModel.create({
             vk_post_id: reply.objectId,
             vk_reply_id: reply.id,
-            vk_owner_id: reply.ownerId,
+            vk_author_id: reply.ownerId,
             tg_reply_id: reply_msg.message_id,
             discussion_tg_id: post.discussion_tg_id,
             tg_author_id: reply_msg?.from?.id ?? null,
@@ -668,7 +668,7 @@ export async function replyToTelegram(reply: any) {
           await ReplyModel.create({
             vk_post_id: reply.objectId,
             vk_reply_id: reply.id,
-            vk_owner_id: reply.ownerId,
+            vk_author_id: reply.ownerId,
             tg_reply_id: reply_msg.message_id,
             discussion_tg_id: post.discussion_tg_id,
             tg_author_id: reply_msg?.from?.id ?? null,
@@ -705,7 +705,7 @@ export async function replyToTelegram(reply: any) {
         await ReplyModel.create({
           vk_post_id: reply.objectId,
           vk_reply_id: reply.id,
-          vk_owner_id: reply.ownerId,
+          vk_author_id: reply.ownerId,
           tg_reply_id: mainMsgId as number,
           discussion_tg_id: post.discussion_tg_id,
           tg_author_id: reply_msg?.from?.id ?? null,

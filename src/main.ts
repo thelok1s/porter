@@ -6,7 +6,6 @@ import { Post } from "@/models/post.schema";
 import logger from "@/lib/logger";
 import { appFiglet } from "@/utils/appFiglet";
 import dotenv from "dotenv";
-import { NarrowedContext } from "telegraf";
 
 dotenv.config();
 
@@ -40,7 +39,7 @@ async function main() {
         // New VK posts webhook
         vkGroupApi.updates.on("wall_post_new", async (context: any) => {
           if (context.wall.createdAt > START_TIME) {
-            logger.debug(context);
+            logger.debug(JSON.parse(JSON.stringify(context)));
             await postToTelegram(context);
           }
         });
@@ -52,7 +51,7 @@ async function main() {
     }
     if (config.crosscommenting.enabled) {
       tgApi.on("message", async (context: any) => {
-        logger.debug(context);
+        logger.debug(JSON.parse(JSON.stringify(context)));
         if (
           context.message.is_automatic_forward &&
           context.message.forward_from_chat?.id.toString() ===

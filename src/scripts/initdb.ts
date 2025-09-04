@@ -1,11 +1,18 @@
 import dotenv from "dotenv";
-import { initDatabase, closeDatabase, sequelize } from "@/lib/sequelize";
+import {
+  initDatabase,
+  closeDatabase,
+  sequelize,
+  DB_FILE,
+} from "@/lib/sequelize";
 
 dotenv.config();
 
 async function main() {
   try {
     await initDatabase();
+    const dbFile = DB_FILE;
+    console.log(`Using SQLite file: ${dbFile}`);
     console.log("Database initialized and tables are ready.");
     const [results, meta] = await sequelize.query(
       "SELECT name FROM sqlite_master WHERE type='table';",
