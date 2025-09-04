@@ -6,19 +6,7 @@ import { Telegraf } from "telegraf";
 import { API } from "vk-io";
 import type { WallPostContext, CommentContext } from "vk-io";
 
-export function getVkLink(id: number, ownerId: number): string {
-  return `https://vk.com/wall${ownerId}_${id}`;
-}
-
-export async function postToVk(message: WallPostContext) {
-  // TODO VK posting logic
-}
-
-export function replyToVk(message: CommentContext) {
-  // TODO VK reply logic
-}
-
-export async function syncRecentPosts(
+export default async function syncRecentPosts(
   tgApi: Telegraf,
   vkGlobalApi: API,
   channelId: string,

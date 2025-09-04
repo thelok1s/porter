@@ -1,5 +1,6 @@
 import config from "../porter.config";
-import { replyToTelegram, postToTelegram } from "@/core/telegram";
+import replyToTelegram from "@/core/telegram/replies";
+import postToTelegram from "@/core/telegram/posts";
 import { vkGroupApi, tgApi, tgChannelId } from "@/core/api";
 import { initDatabase, closeDatabase } from "@/lib/sequelize";
 import { Post } from "@/models/post.schema";
@@ -7,26 +8,10 @@ import logger from "@/lib/logger";
 import { appFiglet } from "@/utils/appFiglet";
 import dotenv from "dotenv";
 import type { Context as TelegrafContext } from "telegraf";
-import { WallAppPost } from "vk-io/lib/api/schemas/objects";
 import { CommentContext, WallPostContext } from "vk-io";
-
-type TGDiscussionMessage = {
-  message_id: number;
-  from?: { id?: number };
-  chat?: { type?: string };
-  is_automatic_forward?: boolean;
-  forward_from_chat?: { id?: number };
-  forward_from_message_id?: number;
-  message_thread_id?: number;
-  reply_to_message?: TGDiscussionMessage;
-};
+import { TGDiscussionMessage } from "./types/Baseline";
 
 dotenv.config();
-
-if (!process.versions.bun) {
-  logger.fatal("Current environment is not Bun. Check README");
-  process.exit(1);
-}
 
 if (
   !process.env.VK_TOKEN ||
