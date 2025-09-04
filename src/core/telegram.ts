@@ -14,6 +14,13 @@ const tgChatId = String(tgChatIdRaw ?? "");
 import { Post } from "@/models/post.schema";
 import { Reply as ReplyModel } from "@/models/reply.schema";
 import { InputMediaPhoto, Message } from "telegraf/types";
+import type {
+  WallPostContext,
+  CommentContext,
+  PhotoAttachment,
+  DocumentAttachment,
+  PollAttachment,
+} from "vk-io";
 
 function splitText(text: string, maxLength: number = 4096): string[] {
   if (!text || text.length <= maxLength) {
@@ -106,7 +113,7 @@ function formatMessageText(text: string, useHtml: boolean = true): string {
   }
 }
 
-export async function postToTelegram(post: any) {
+export async function postToTelegram(post: WallPostContext) {
   // Check if repost
   if (config.crossposting.parameters.ignoreReposts && post.isRepost) {
     logger.info(
@@ -129,7 +136,7 @@ export async function postToTelegram(post: any) {
 
   try {
     // HTML formatting
-    const processedText = formatMessageText(post.wall.text);
+    const processedText = formatMessageText(post.wall.text || "");
 
     // Split text if it's too long
     const textParts = splitText(processedText);
@@ -140,15 +147,10 @@ export async function postToTelegram(post: any) {
       const photoUrls: InputMediaPhoto[] = [];
 
       for (const attachment of post.wall.attachments) {
-        if (
-          attachment.toJSON().largeSizeUrl ||
-          attachment.toJSON().mediumSizeUrl ||
-          attachment.toJSON().smallSizeUrl
-        ) {
-          const url =
-            attachment.toJSON().largeSizeUrl ||
-            attachment.toJSON().mediumSizeUrl ||
-            attachment.toJSON().smallSizeUrl;
+        const json = attachment.toJSON() as PhotoAttachment;
+        const url =
+          json.largeSizeUrl ?? json.mediumSizeUrl ?? json.smallSizeUrl;
+        if (url) {
           photoUrls.push({
             type: "photo",
             media: url,
@@ -159,14 +161,12 @@ export async function postToTelegram(post: any) {
       // Multiple photos
       if (photoUrls.length > 1) {
         // If text is too long, send it as a separate message
-        let post_msg:
-          | (
-              | Message.DocumentMessage
-              | Message.AudioMessage
-              | Message.PhotoMessage
-              | Message.VideoMessage
-            )[]
-          | { from: { id: any } }[];
+        let post_msg: (
+          | Message.DocumentMessage
+          | Message.AudioMessage
+          | Message.PhotoMessage
+          | Message.VideoMessage
+        )[];
 
         if (textParts.length > 1 || textParts[0].length > 1024) {
           let mainMsgId = null;
@@ -187,25 +187,20 @@ export async function postToTelegram(post: any) {
           // Text fits in caption
           photoUrls[0].caption = textParts[0];
           photoUrls[0].parse_mode = "HTML";
-          post_msg = (await tgApi.telegram.sendMediaGroup(
+          post_msg = await tgApi.telegram.sendMediaGroup(
             tgChannelPublicLink,
             photoUrls,
-          )) as any[];
+          );
         }
-
-        const textHash = new Bun.CryptoHasher("md5");
-        textHash.update(post.wall.text);
 
         await Post.create({
           vk_id: post.wall.id,
           vk_author_id: post.wall.ownerId,
-          tg_id: (post_msg as any[])[0]?.message_id,
+          tg_id: post_msg[0]?.message_id as number,
           discussion_tg_id: null,
-          tg_author_id: JSON.stringify(
-            (post_msg as any[])[0]?.from?.id ?? null,
-          ),
+          tg_author_id: JSON.stringify(post_msg[0]?.from?.id ?? null),
           created_at: post.wall.createdAt,
-          text_hash: textHash.digest("base64"),
+
           attachments: JSON.stringify(post.wall.attachments),
         });
         textSent = true;
@@ -241,9 +236,6 @@ export async function postToTelegram(post: any) {
           );
         }
 
-        const textHash = new Bun.CryptoHasher("md5");
-        textHash.update(post.wall.text);
-
         await Post.create({
           vk_id: post.wall.id,
           vk_author_id: post.wall.ownerId,
@@ -251,7 +243,7 @@ export async function postToTelegram(post: any) {
           discussion_tg_id: null,
           tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
           created_at: post.wall.createdAt,
-          text_hash: textHash.digest("base64"),
+
           attachments: JSON.stringify(post.wall.attachments),
         });
         textSent = true;
@@ -279,21 +271,18 @@ export async function postToTelegram(post: any) {
 
               post_msg = await tgApi.telegram.sendAnimation(
                 tgChannelPublicLink,
-                attachment.toJSON().url,
+                String((attachment.toJSON() as DocumentAttachment).url ?? ""),
               );
             } else {
               post_msg = await tgApi.telegram.sendAnimation(
                 tgChannelPublicLink,
-                attachment.toJSON().url,
+                String((attachment.toJSON() as DocumentAttachment).url ?? ""),
                 {
                   caption: textParts[0],
                   parse_mode: "HTML",
                 },
               );
             }
-
-            const textHash = new Bun.CryptoHasher("md5");
-            textHash.update(post.wall.text);
 
             await Post.create({
               vk_id: post.wall.id,
@@ -302,7 +291,7 @@ export async function postToTelegram(post: any) {
               discussion_tg_id: null,
               tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
               created_at: post.wall.createdAt,
-              text_hash: textHash.digest("base64"),
+
               attachments: JSON.stringify(post.wall.attachments),
             });
             textSent = true;
@@ -322,8 +311,9 @@ export async function postToTelegram(post: any) {
           ) &&
           !config.crossposting.parameters.ignorePolls
         ) {
-          const pollOptions: string[] = attachment.answers.map(
-            (answer: { text: any }) => answer.text,
+          const json = attachment.toJSON() as PollAttachment;
+          const pollOptions: string[] = (json.answers ?? []).map(
+            (answer) => answer.text,
           );
 
           if (!textSent) {
@@ -340,12 +330,9 @@ export async function postToTelegram(post: any) {
 
           const post_msg = await tgApi.telegram.sendPoll(
             tgChannelPublicLink,
-            attachment.question,
+            json.question ?? "Poll",
             pollOptions,
           );
-
-          const textHash = new Bun.CryptoHasher("md5");
-          textHash.update(post.wall.text);
 
           await Post.create({
             vk_id: post.wall.id,
@@ -354,7 +341,7 @@ export async function postToTelegram(post: any) {
             discussion_tg_id: null,
             tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
             created_at: post.wall.createdAt,
-            text_hash: textHash.digest("base64"),
+
             attachments: JSON.stringify(post.wall.attachments),
           });
         }
@@ -373,9 +360,6 @@ export async function postToTelegram(post: any) {
         }
       }
 
-      const textHash = new Bun.CryptoHasher("md5");
-      textHash.update(post.wall.text);
-
       await Post.create({
         vk_id: post.wall.id,
         vk_author_id: post.wall.ownerId,
@@ -383,19 +367,21 @@ export async function postToTelegram(post: any) {
         discussion_tg_id: null,
         tg_author_id: JSON.stringify(post_msg?.from?.id ?? null),
         created_at: post.wall.createdAt,
-        text_hash: textHash.digest("base64"),
+
         attachments: JSON.stringify(post.wall.attachments),
       });
     }
     logger.info(
       `[VK –> TG] Successfully ported: ${getVkLink(post.wall.id, post.wall.ownerId)}`,
     );
-  } catch (error: any) {
-    logger.error(`[VK -/-> TG] Error while porting: ${error.message}`);
+  } catch (error: unknown) {
+    logger.error(
+      `[VK -/-> TG] Error while porting: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
-export async function replyToTelegram(reply: any) {
+export async function replyToTelegram(reply: CommentContext) {
   try {
     const post = await Post.findOne({
       where: { vk_id: reply.objectId },
@@ -407,22 +393,27 @@ export async function replyToTelegram(reply: any) {
       return;
     }
 
-    const [sender] = await vkGlobalApi.users.get({
-      user_ids: reply.fromId,
-    });
+    const [sender] = (await vkGlobalApi.users.get({
+      user_ids: [reply.fromId],
+    })) as unknown as Array<{
+      id: number;
+      first_name: string;
+      last_name: string;
+    }>;
 
     if (reply.isNew || reply.isRestore) {
       const existingReply = await ReplyModel.findOne({
         where: { vk_reply_id: reply.id },
         attributes: ["id"],
       });
+
       if (existingReply) {
         logger.warn(`Reply already ported: ${reply.id} `);
         return;
       }
 
       //  HTML formatting
-      const processedText = formatMessageText(reply.toJSON().text);
+      const processedText = formatMessageText(reply.text || "");
       const authorLink = getHtmlLink(
         `https://www.vk.com/id${sender.id}`,
         `${sender.first_name} ${sender.last_name}`,
@@ -437,15 +428,10 @@ export async function replyToTelegram(reply: any) {
         const photoUrls: InputMediaPhoto[] = [];
 
         for (const attachment of reply.attachments) {
-          if (
-            attachment.toJSON().largeSizeUrl ||
-            attachment.toJSON().mediumSizeUrl ||
-            attachment.toJSON().smallSizeUrl
-          ) {
-            const url =
-              attachment.toJSON().largeSizeUrl ||
-              attachment.toJSON().mediumSizeUrl ||
-              attachment.toJSON().smallSizeUrl;
+          const json = attachment.toJSON() as PhotoAttachment;
+          const url =
+            json.largeSizeUrl ?? json.mediumSizeUrl ?? json.smallSizeUrl;
+          if (url) {
             photoUrls.push({
               type: "photo",
               media: url,
@@ -455,14 +441,12 @@ export async function replyToTelegram(reply: any) {
 
         // Multiple photos
         if (photoUrls.length > 1) {
-          let reply_msg:
-            | (
-                | Message.DocumentMessage
-                | Message.AudioMessage
-                | Message.PhotoMessage
-                | Message.VideoMessage
-              )[]
-            | { from: { id: any } }[];
+          let reply_msg: (
+            | Message.DocumentMessage
+            | Message.AudioMessage
+            | Message.PhotoMessage
+            | Message.VideoMessage
+          )[];
 
           if (textParts.length > 1 || textParts[0].length > 1024) {
             // Text is too long
@@ -487,16 +471,16 @@ export async function replyToTelegram(reply: any) {
             }
 
             // send media
-            reply_msg = (await tgApi.telegram.sendMediaGroup(
+            reply_msg = await tgApi.telegram.sendMediaGroup(
               tgChatId,
               photoUrls,
               {
                 reply_parameters: {
                   chat_id: tgChatId,
-                  message_id: mainMsgId as any,
+                  message_id: Number(mainMsgId),
                 },
               },
-            )) as any[];
+            );
           } else {
             const mediaGroup: InputMediaPhoto[] = photoUrls.map(
               (photo, index) => ({
@@ -511,7 +495,7 @@ export async function replyToTelegram(reply: any) {
               }),
             );
 
-            reply_msg = (await tgApi.telegram.sendMediaGroup(
+            reply_msg = await tgApi.telegram.sendMediaGroup(
               tgChatId,
               mediaGroup,
               {
@@ -520,22 +504,22 @@ export async function replyToTelegram(reply: any) {
                   message_id: post.discussion_tg_id,
                 },
               },
-            )) as any[];
+            );
           }
-
-          const textHash = new Bun.CryptoHasher("md5");
-          textHash.update(reply.text);
 
           await ReplyModel.create({
             vk_post_id: reply.objectId,
             vk_reply_id: reply.id,
             vk_author_id: reply.ownerId,
-            tg_reply_id: (reply_msg as any[])[0]?.message_id,
+            tg_reply_id: reply_msg[0]?.message_id as number,
             discussion_tg_id: post.discussion_tg_id,
-            tg_author_id: (reply_msg as any[])[0]?.from?.id ?? null,
-            created_at: reply.toJSON().createdAt,
-            text_hash: textHash.digest("base64"),
-            attachments: JSON.stringify(reply.toJSON().attachments),
+            tg_author_id: reply_msg[0]?.from?.id ?? null,
+            created_at:
+              typeof reply.createdAt === "number"
+                ? new Date(reply.createdAt * 1000)
+                : reply.createdAt,
+
+            attachments: JSON.stringify(reply.attachments),
           });
 
           // One photo
@@ -590,9 +574,6 @@ export async function replyToTelegram(reply: any) {
             );
           }
 
-          const textHash = new Bun.CryptoHasher("md5");
-          textHash.update(reply.text);
-
           await ReplyModel.create({
             vk_post_id: reply.objectId,
             vk_reply_id: reply.id,
@@ -600,9 +581,12 @@ export async function replyToTelegram(reply: any) {
             tg_reply_id: reply_msg.message_id,
             discussion_tg_id: post.discussion_tg_id,
             tg_author_id: reply_msg?.from?.id ?? null,
-            created_at: reply.toJSON().createdAt,
-            text_hash: textHash.digest("base64"),
-            attachments: JSON.stringify(reply.toJSON().attachments),
+            created_at:
+              typeof reply.createdAt === "number"
+                ? new Date(reply.createdAt * 1000)
+                : reply.createdAt,
+
+            attachments: JSON.stringify(reply.attachments),
           });
 
           // File (GIF specifically)
@@ -638,7 +622,9 @@ export async function replyToTelegram(reply: any) {
 
             reply_msg = await tgApi.telegram.sendAnimation(
               tgChatId,
-              reply.attachments[0].toJSON().url,
+              String(
+                (reply.attachments[0].toJSON() as DocumentAttachment).url ?? "",
+              ),
               {
                 reply_parameters: {
                   chat_id: tgChatId,
@@ -650,7 +636,9 @@ export async function replyToTelegram(reply: any) {
             // Text fits in caption
             reply_msg = await tgApi.telegram.sendAnimation(
               tgChatId,
-              reply.attachments[0].toJSON().url,
+              String(
+                (reply.attachments[0].toJSON() as DocumentAttachment).url ?? "",
+              ),
               {
                 caption: textParts[0],
                 parse_mode: "HTML",
@@ -662,9 +650,6 @@ export async function replyToTelegram(reply: any) {
             );
           }
 
-          const textHash = new Bun.CryptoHasher("md5");
-          textHash.update(reply.text);
-
           await ReplyModel.create({
             vk_post_id: reply.objectId,
             vk_reply_id: reply.id,
@@ -672,9 +657,12 @@ export async function replyToTelegram(reply: any) {
             tg_reply_id: reply_msg.message_id,
             discussion_tg_id: post.discussion_tg_id,
             tg_author_id: reply_msg?.from?.id ?? null,
-            created_at: reply.toJSON().createdAt,
-            text_hash: textHash.digest("base64"),
-            attachments: JSON.stringify(reply.toJSON().attachments),
+            created_at:
+              typeof reply.createdAt === "number"
+                ? new Date(reply.createdAt * 1000)
+                : reply.createdAt,
+
+            attachments: JSON.stringify(reply.attachments),
           });
         }
       } else {
@@ -699,9 +687,6 @@ export async function replyToTelegram(reply: any) {
           }
         }
 
-        const textHash = new Bun.CryptoHasher("md5");
-        textHash.update(reply.text);
-
         await ReplyModel.create({
           vk_post_id: reply.objectId,
           vk_reply_id: reply.id,
@@ -709,9 +694,12 @@ export async function replyToTelegram(reply: any) {
           tg_reply_id: mainMsgId as number,
           discussion_tg_id: post.discussion_tg_id,
           tg_author_id: reply_msg?.from?.id ?? null,
-          created_at: reply.toJSON().createdAt,
-          text_hash: textHash.digest("base64"),
-          attachments: JSON.stringify(reply.toJSON().attachments),
+          created_at:
+            typeof reply.createdAt === "number"
+              ? new Date((reply.createdAt as number) * 1000)
+              : reply.createdAt,
+
+          attachments: JSON.stringify(reply.attachments || []),
         });
         logger.info(
           `[VK –> TG] Reply ported: ${reply.id} (for msg: ${mainMsgId})`,
@@ -729,7 +717,7 @@ export async function replyToTelegram(reply: any) {
       }
 
       // Process the reply text with HTML formatting
-      const processedText = formatMessageText(reply.toJSON().text);
+      const processedText = formatMessageText(reply.text || "");
       const authorLink = getHtmlLink(
         `https://www.vk.com/id${sender.id}`,
         `${sender.first_name} ${sender.last_name}`,
@@ -745,13 +733,6 @@ export async function replyToTelegram(reply: any) {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
         },
-      );
-
-      const textHash = new Bun.CryptoHasher("md5");
-      textHash.update(reply.text);
-      await ReplyModel.update(
-        { text_hash: textHash.digest("base64") },
-        { where: { vk_reply_id: reply.id } },
       );
 
       logger.info(`[VK –> TG] Reply edited: ${reply.id}`);

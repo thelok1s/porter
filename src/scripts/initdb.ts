@@ -18,10 +18,11 @@ async function main() {
       "SELECT name FROM sqlite_master WHERE type='table';",
     );
     console.log(
-      `Tables: ${results.map((table: any) => table.name).join(", ")}`,
+      `Tables: ${(results as Array<{ name: string }>).map((table) => table.name).join(", ")}`,
     );
-  } catch (err: any) {
-    console.error("Failed to initialize database:", err?.message ?? err);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("Failed to initialize database:", msg);
     process.exitCode = 1;
   } finally {
     await closeDatabase().catch(() => void 0);

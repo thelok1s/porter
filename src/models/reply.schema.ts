@@ -20,7 +20,6 @@ export class Reply extends Model<
   declare discussion_tg_id: number | null; // references Post.discussion_tg_id (targetKey)
   declare tg_author_id: number | null;
   declare created_at: Date | null;
-  declare text_hash: string | null;
   declare attachments: unknown | null;
 }
 
@@ -38,7 +37,6 @@ Reply.init(
       allowNull: true,
       defaultValue: DataTypes.NOW,
     },
-    text_hash: { type: DataTypes.TEXT, allowNull: true },
     attachments: { type: DataTypes.JSON, allowNull: true },
   },
   {

@@ -18,7 +18,6 @@ export class Post extends Model<
   declare discussion_tg_id: number | null;
   declare tg_author_id: string | null;
   declare created_at: number | null;
-  declare text_hash: string | null;
   declare attachments: string | null;
 }
 
@@ -35,7 +34,6 @@ Post.init(
     },
     tg_author_id: { type: DataTypes.TEXT, allowNull: true },
     created_at: { type: DataTypes.INTEGER, allowNull: true },
-    text_hash: { type: DataTypes.TEXT, allowNull: true },
     attachments: { type: DataTypes.TEXT, allowNull: true },
   },
   {

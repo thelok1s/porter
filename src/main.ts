@@ -6,6 +6,20 @@ import { Post } from "@/models/post.schema";
 import logger from "@/lib/logger";
 import { appFiglet } from "@/utils/appFiglet";
 import dotenv from "dotenv";
+import type { Context as TelegrafContext } from "telegraf";
+import { WallAppPost } from "vk-io/lib/api/schemas/objects";
+import { CommentContext, WallPostContext } from "vk-io";
+
+type TGDiscussionMessage = {
+  message_id: number;
+  from?: { id?: number };
+  chat?: { type?: string };
+  is_automatic_forward?: boolean;
+  forward_from_chat?: { id?: number };
+  forward_from_message_id?: number;
+  message_thread_id?: number;
+  reply_to_message?: TGDiscussionMessage;
+};
 
 dotenv.config();
 
@@ -36,53 +50,121 @@ async function main() {
   try {
     if (config.crossposting.enabled) {
       if (config.crossposting.useOrigin.vk) {
-        // New VK posts webhook
-        vkGroupApi.updates.on("wall_post_new", async (context: any) => {
-          if (context.wall.createdAt > START_TIME) {
+        vkGroupApi.updates.on("wall_post_new", async (context) => {
+          if (
+            ((context as unknown as { wall?: { createdAt?: number } }).wall
+              ?.createdAt ?? 0) > START_TIME
+          ) {
             logger.debug(JSON.parse(JSON.stringify(context)));
-            await postToTelegram(context);
+            await postToTelegram(context as WallPostContext);
           }
         });
       }
       if (config.crossposting.useOrigin.tg) {
-        // TODO: Crosspost from tg
-        //  tgApi.on("message", async (context) => {});
+        tgApi.on("message", async (context: TelegrafContext) => {
+          const msg = context.message as TGDiscussionMessage | undefined;
+          if (!msg) return;
+          const chatType = msg.chat?.type;
+          if (chatType !== "group") return;
+
+          // Skip the automatic forward itself — you already handle linking above
+          if (msg.is_automatic_forward) return;
+
+          try {
+            // Resolve the root discussion message id (the auto-forward from the channel)
+            let discussionRootId: number | null = null;
+
+            // If the discussion group uses forum topics, the thread id is provided
+            if (typeof msg.message_thread_id === "number") {
+              discussionRootId = msg.message_thread_id;
+            }
+
+            // Fallback for non-forum discussions: climb reply chain to the auto-forward
+            if (!discussionRootId && msg.reply_to_message) {
+              let root: TGDiscussionMessage | undefined = msg.reply_to_message;
+              while (root?.reply_to_message && !root.is_automatic_forward) {
+                root = root.reply_to_message;
+              }
+              if (
+                root?.is_automatic_forward &&
+                root.forward_from_chat?.id?.toString() ===
+                  "-100" + String(tgChannelId)
+              ) {
+                discussionRootId = root.message_id;
+              }
+            }
+
+            if (!discussionRootId) {
+              // Not part of any tracked discussion thread
+              return;
+            }
+
+            // Find the mapped post by the discussion root
+            const post = await Post.findOne({
+              where: { discussion_tg_id: discussionRootId },
+            });
+            if (!post) {
+              logger.warn(
+                `No post found for discussion root ${discussionRootId}`,
+              );
+              return;
+            }
+
+            // At this point you have:
+            // - post.tg_id: original channel message id
+            // - post.discussion_tg_id: root discussion message id (thread)
+            // - msg: actual user comment inside the discussion
+
+            // TODO: Persist the comment or crosspost to VK here
+            logger.info(
+              `[TG discussion] post.tg_id=${post.tg_id}, thread=${discussionRootId}, msg=${msg.message_id}, from=${msg.from?.id}`,
+            );
+
+            // Example: call your future VK cross-comment function
+            // await replyToVk({ post, msg });
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error(`Failed to process TG discussion message: ${msg}`);
+          }
+        });
       }
     }
     if (config.crosscommenting.enabled) {
-      tgApi.on("message", async (context: any) => {
+      tgApi.on("message", async (context: TelegrafContext) => {
         logger.debug(JSON.parse(JSON.stringify(context)));
+        const cm = context.message as TGDiscussionMessage | undefined;
         if (
-          context.message.is_automatic_forward &&
-          context.message.forward_from_chat?.id.toString() ===
-            "-100" + String(tgChannelId)
+          cm &&
+          cm.is_automatic_forward &&
+          cm.forward_from_chat?.id?.toString() === "-100" + String(tgChannelId)
         ) {
           logger.debug(`Caught automatic forward:
-        Discussion msg ID: ${context.message.message_id}
-        Original msg ID: ${context.message.forward_from_message_id}
+        Discussion msg ID: ${cm.message_id}
+        Original msg ID: ${cm.forward_from_message_id}
       `);
 
           try {
             const [affected] = await Post.update(
-              { discussion_tg_id: context.message.message_id },
-              { where: { tg_id: context.message.forward_from_message_id } },
+              { discussion_tg_id: cm.message_id },
+              { where: { tg_id: cm.forward_from_message_id } },
             );
 
             if (affected === 0) {
               logger.warn(`No posts updated with discussion ID.
-            Channel msg ID: ${context.message.forward_from_message_id}
-            Discussion msg ID: ${context.message.message_id}
+            Channel msg ID: ${cm.forward_from_message_id}
+            Discussion msg ID: ${cm.message_id}
           `);
             } else {
               logger.info(`[VK -> TG] Successfully linked discussion message:
-            Channel msg ID: ${context.message.forward_from_message_id}
-            Discussion msg ID: ${context.message.message_id}
+            Channel msg ID: ${cm.forward_from_message_id}
+            Discussion msg ID: ${cm.message_id}
           `);
             }
-          } catch (error: any) {
-            logger.error(`Error updating discussion ID: ${error.message}
-          Channel msg ID: ${context.message.forward_from_message_id}
-          Discussion msg ID: ${context.message.message_id}
+          } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : String(error);
+            logger.error(`Error updating discussion ID: ${msg}
+          Channel msg ID: ${cm.forward_from_message_id}
+          Discussion msg ID: ${cm.message_id}
         `);
           }
         }
@@ -97,9 +179,11 @@ async function main() {
             "wall_reply_edit",
             "wall_reply_delete",
           ],
-          async (context: any) => {
-            if (context.createdAt > START_TIME) {
-              await replyToTelegram(context);
+          async (context) => {
+            const createdAt =
+              (context as unknown as { createdAt?: number }).createdAt ?? 0;
+            if (createdAt > START_TIME) {
+              await replyToTelegram(context as CommentContext);
             }
           },
         );
@@ -113,13 +197,14 @@ async function main() {
     logger.info("Bot started successfully (･ω<)☆ \n");
 
     //  const sync = setInterval(() => {syncRecentPosts()}, 1000*60*10);
-  } catch (error: any) {
-    logger.error(`Runtime error: ${error.message}`);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.error(`Runtime error: ${msg}`);
     process.exit(1);
   }
 }
 
-main().catch((error: any) => {
+main().catch((error: unknown) => {
   logger.error({ error });
 });
 
