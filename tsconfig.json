@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "types": ["bun-types"],
     "target": "ES2023",
     "module": "commonjs",
     "strict": true,
