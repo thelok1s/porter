@@ -11,7 +11,9 @@ import type { Context as TelegrafContext } from "telegraf";
 import { CommentContext, WallPostContext } from "vk-io";
 import { TGDiscussionMessage } from "./types/Baseline";
 
+appFiglet();
 dotenv.config();
+const START_TIME = Math.floor(Date.now() / 1000);
 
 if (
   !process.env.VK_TOKEN ||
@@ -20,39 +22,51 @@ if (
   !process.env.TELEGRAM_CHANNEL_PUBLIC_LINK ||
   !process.env.TELEGRAM_CHAT_ID
 ) {
-  logger.fatal("Environment variables are not set or .env is missing");
+  logger.fatal(
+    "Environment variables are not set or .env is missing. Exiting.",
+  );
+  process.exit(1);
+}
+
+if (!config.crosscommenting.enabled && !config.crossposting.enabled) {
+  logger.fatal("And why would you do that?");
   process.exit(1);
 }
 
 async function main() {
-  appFiglet();
-
   await initDatabase();
-  const START_TIME = Math.floor(Date.now() / 1000);
   await vkGroupApi.updates.start();
   tgApi.launch().then();
 
   try {
     if (config.crossposting.enabled) {
-      if (config.crossposting.useOrigin.vk) {
-        vkGroupApi.updates.on("wall_post_new", async (context) => {
-          if (
-            ((context as unknown as { wall?: { createdAt?: number } }).wall
-              ?.createdAt ?? 0) > START_TIME
-          ) {
-            logger.debug(JSON.parse(JSON.stringify(context)));
-            await postToTelegram(context as WallPostContext);
-          }
-        });
+      if (
+        config.crossposting.origin === "vk" ||
+        config.crossposting.origin === "both"
+      ) {
+        vkGroupApi.updates.on(
+          "wall_post_new",
+          async (context: WallPostContext) => {
+            if (!context) return;
+            if (context.wall.createdAt ?? 0 > START_TIME) {
+              logger.debug(
+                "wall_post_new event:" + JSON.parse(JSON.stringify(context)),
+              );
+              await postToTelegram(context as WallPostContext);
+            }
+          },
+        );
       }
-      if (config.crossposting.useOrigin.tg) {
+      if (
+        config.crossposting.origin === "tg" ||
+        config.crossposting.origin === "both"
+      ) {
         tgApi.on("message", async (context: TelegrafContext) => {
-          const msg = context.message as TGDiscussionMessage | undefined;
-          if (!msg) return;
+          if (!context) return;
+          const msg = context.message as TGDiscussionMessage;
           const chatType = msg.chat?.type;
           if (chatType !== "group") return;
-
-          // Skip the automatic forward itself — you already handle linking above
+          // Skip the automatic forward itself
           if (msg.is_automatic_forward) return;
 
           try {
@@ -155,7 +169,11 @@ async function main() {
         }
       });
 
-      if (config.crosscommenting.useOrigin.vk) {
+      if (
+        (config.crosscommenting.origin === "vk" ||
+          config.crosscommenting.origin === "both") &&
+        config.crosscommenting.mode === "direct"
+      ) {
         // Replies webhooks
         vkGroupApi.updates.on(
           [
@@ -173,7 +191,11 @@ async function main() {
           },
         );
       }
-      if (config.crosscommenting.useOrigin.tg) {
+      if (
+        (config.crosscommenting.origin === "tg" ||
+          config.crosscommenting.origin === "both") &&
+        config.crosscommenting.mode === "direct"
+      ) {
         // TODO: IMPORTANT!! Crosscomment from tg to vk
       }
     }
