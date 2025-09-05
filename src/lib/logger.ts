@@ -1,9 +1,7 @@
 import pino from "pino";
 import fs from "fs";
 import path from "path";
-import PorterConfig from "../../porter.config";
-
-const config = PorterConfig;
+import { PorterConfig as config } from "../../porter.config";
 
 // Ensure logs directory exists
 const logsDir = path.resolve(process.cwd(), "logs");

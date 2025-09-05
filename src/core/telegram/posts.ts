@@ -1,4 +1,4 @@
-import config from "../../../porter.config";
+import { PorterConfig as config } from "../../../porter.config";
 import { getVkLink } from "../utils";
 const tgChannelPublicLink = String(tgChannelPublicLinkRaw ?? "");
 import logger from "@/lib/logger";

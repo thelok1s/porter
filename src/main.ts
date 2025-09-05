@@ -1,4 +1,4 @@
-import config from "../porter.config";
+import { PorterConfig as config } from "../porter.config";
 import replyToTelegram from "@/core/telegram/replies";
 import postToTelegram from "@/core/telegram/posts";
 import { vkGroupApi, tgApi, tgChannelId } from "@/core/api";

@@ -1,13 +1,13 @@
 {
   "name": "porter",
   "version": "3.1.1-beta",
-  "main": "app.ts",
-  "private": "true",
+  "main": "src/main.ts",
   "scripts": {
-    "start": "bun src/main.ts",
-    "prune": "bun src/scripts/prunedb.ts",
-    "init": "bun src/scripts/initdb.ts",
-    "flushlogs": "bun src/scripts/flushlogs.ts"
+    "start": "tsx src/main.ts",
+    "prune": "tsx src/scripts/prunedb.ts",
+    "init": "tsx src/scripts/initdb.ts",
+    "flushlogs": "tsx src/scripts/flushlogs.ts",
+    "lint": "eslint . --ext ts,js,mjs,cjs --report-unused-disable-directives --max-warnings 0"
   },
   "keywords": [],
   "author": "thelok1s",
@@ -15,14 +15,14 @@
   "description": "vk crossposting & crosscommenting bot",
   "devDependencies": {
     "@eslint/js": "^9.18.0",
-    "@types/bun": "^1.2.2",
     "@types/figlet": "^1.7.0",
     "@types/node": "^22.10.2",
     "eslint": "^9.18.0",
     "globals": "^15.14.0",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
-    "typescript-eslint": "^8.20.0"
+    "typescript-eslint": "^8.20.0",
+    "tsx": "^4.0.0"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

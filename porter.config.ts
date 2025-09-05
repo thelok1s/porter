@@ -4,25 +4,18 @@ const PorterConfig: Config = {
   loggingLevel: "debug",
   crossposting: {
     enabled: true,
-    useOrigin: {
-      vk: true,
-      tg: false,
-    },
+    origin: "vk",
     parameters: {
       ignoreReposts: true,
       ignorePolls: false,
     },
   },
   crosscommenting: {
-    enabled: true,
-    useOrigin: {
-      vk: true,
-      tg: false,
-    },
-    parameters: {
-      match: [],
-    },
+    enabled: false,
+  },
+  notifications: {
+    enabled: false,
   },
 };
 
-export default PorterConfig;
+export { PorterConfig };

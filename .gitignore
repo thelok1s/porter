@@ -1,7 +1,6 @@
-# Dev dependencies (bring your own)
+# Prettier
 .prettierrc
 .prettierignore
-eslint.config.mjs
 
 # Node modules
 node_modules/
