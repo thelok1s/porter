@@ -15,6 +15,7 @@ export class Post extends Model<
   declare vk_id: number;
   declare vk_author_id: number | null;
   declare tg_id: number;
+  declare tg_ids: number[] | null;
   declare discussion_tg_id: number | null;
   declare tg_author_id: string | null;
   declare created_at: number | null;
@@ -27,6 +28,7 @@ Post.init(
     vk_id: { type: DataTypes.INTEGER, allowNull: false, unique: true },
     vk_author_id: { type: DataTypes.INTEGER, allowNull: true },
     tg_id: { type: DataTypes.INTEGER, allowNull: false, unique: true },
+    tg_ids: { type: DataTypes.JSON, allowNull: true },
     discussion_tg_id: {
       type: DataTypes.INTEGER,
       allowNull: true,

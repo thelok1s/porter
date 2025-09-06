@@ -15,7 +15,9 @@ import type {
   PollAttachment,
 } from "vk-io";
 import { formatMessageText, splitText } from "../utils";
-import { DatabaseError, SequelizeScopeError } from "sequelize";
+import { BaseError, DatabaseError, SequelizeScopeError } from "sequelize";
+
+let lastPostMsg: Message.TextMessage | null | undefined = null;
 
 export default async function postToTelegram(post: WallPostContext) {
   // Check if repost
@@ -41,6 +43,7 @@ export default async function postToTelegram(post: WallPostContext) {
   try {
     // HTML formatting
     const processedText = formatMessageText(post.wall.text || "");
+    const sentMessageIds: number[] = [];
 
     // Split text if it's too long
     const textParts = splitText(processedText);
@@ -48,6 +51,7 @@ export default async function postToTelegram(post: WallPostContext) {
     // Check for attachments
     if (post.wall.attachments.length > 0) {
       let textSent = false;
+      let recordCreated = false;
       const photoUrls: InputMediaPhoto[] = [];
 
       for (const attachment of post.wall.attachments) {
@@ -80,6 +84,7 @@ export default async function postToTelegram(post: WallPostContext) {
               part,
               { parse_mode: "HTML" },
             );
+            sentMessageIds.push(msgResult.message_id);
             if (!mainMsgId) mainMsgId = msgResult.message_id;
           }
 
@@ -95,18 +100,24 @@ export default async function postToTelegram(post: WallPostContext) {
             tgChannelPublicLink,
             photoUrls,
           );
+          for (const m of post_msg) sentMessageIds.push(m.message_id);
+          for (const m of post_msg) sentMessageIds.push(m.message_id);
         }
 
-        await Post.create({
-          vk_id: post.wall.id,
-          vk_author_id: post.wall.ownerId,
-          tg_id: post_msg[0]?.message_id as number,
-          discussion_tg_id: null,
-          tg_author_id: JSON.stringify(post_msg[0]?.from?.id ?? null),
-          created_at: post.wall.createdAt,
+        if (!recordCreated) {
+          await Post.create({
+            vk_id: post.wall.id,
+            vk_author_id: post.wall.ownerId,
+            tg_id: sentMessageIds[0] as number,
+            tg_ids: sentMessageIds,
+            discussion_tg_id: null,
+            tg_author_id: JSON.stringify(post_msg[0]?.from?.id ?? null),
+            created_at: post.wall.createdAt,
 
-          attachments: JSON.stringify(post.wall.attachments),
-        });
+            attachments: JSON.stringify(post.wall.attachments),
+          });
+          recordCreated = true;
+        }
         textSent = true;
 
         // One photo
@@ -122,6 +133,7 @@ export default async function postToTelegram(post: WallPostContext) {
               part,
               { parse_mode: "HTML" },
             );
+            sentMessageIds.push(msgResult.message_id);
             if (!mainMsgId) mainMsgId = msgResult.message_id;
           }
 
@@ -129,6 +141,7 @@ export default async function postToTelegram(post: WallPostContext) {
             tgChannelPublicLink,
             photoUrls[0].media,
           );
+          sentMessageIds.push(post_msg.message_id);
         } else {
           post_msg = await tgApi.telegram.sendPhoto(
             tgChannelPublicLink,
@@ -138,18 +151,23 @@ export default async function postToTelegram(post: WallPostContext) {
               parse_mode: "HTML",
             },
           );
+          sentMessageIds.push(post_msg.message_id);
         }
 
-        await Post.create({
-          vk_id: post.wall.id,
-          vk_author_id: post.wall.ownerId,
-          tg_id: post_msg.message_id,
-          discussion_tg_id: null,
-          tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
-          created_at: post.wall.createdAt,
+        if (!recordCreated) {
+          await Post.create({
+            vk_id: post.wall.id,
+            vk_author_id: post.wall.ownerId,
+            tg_id: sentMessageIds[0] as number,
+            tg_ids: sentMessageIds,
+            discussion_tg_id: null,
+            tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
+            created_at: post.wall.createdAt,
 
-          attachments: JSON.stringify(post.wall.attachments),
-        });
+            attachments: JSON.stringify(post.wall.attachments),
+          });
+          recordCreated = true;
+        }
         textSent = true;
       }
 
@@ -170,6 +188,7 @@ export default async function postToTelegram(post: WallPostContext) {
                   part,
                   { parse_mode: "HTML" },
                 );
+                sentMessageIds.push(msgResult.message_id);
                 if (!mainMsgId) mainMsgId = msgResult.message_id;
               }
 
@@ -177,6 +196,7 @@ export default async function postToTelegram(post: WallPostContext) {
                 tgChannelPublicLink,
                 String((attachment.toJSON() as DocumentAttachment).url ?? ""),
               );
+              sentMessageIds.push(post_msg.message_id);
             } else {
               post_msg = await tgApi.telegram.sendAnimation(
                 tgChannelPublicLink,
@@ -186,18 +206,23 @@ export default async function postToTelegram(post: WallPostContext) {
                   parse_mode: "HTML",
                 },
               );
+              sentMessageIds.push(post_msg.message_id);
             }
 
-            await Post.create({
-              vk_id: post.wall.id,
-              vk_author_id: post.wall.ownerId,
-              tg_id: post_msg.message_id,
-              discussion_tg_id: null,
-              tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
-              created_at: post.wall.createdAt,
+            if (!recordCreated) {
+              await Post.create({
+                vk_id: post.wall.id,
+                vk_author_id: post.wall.ownerId,
+                tg_id: sentMessageIds[0] as number,
+                tg_ids: sentMessageIds,
+                discussion_tg_id: null,
+                tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
+                created_at: post.wall.createdAt,
 
-              attachments: JSON.stringify(post.wall.attachments),
-            });
+                attachments: JSON.stringify(post.wall.attachments),
+              });
+              recordCreated = true;
+            }
             textSent = true;
           }
         }
@@ -228,6 +253,7 @@ export default async function postToTelegram(post: WallPostContext) {
                 part,
                 { parse_mode: "HTML" },
               );
+              sentMessageIds.push(msgResult.message_id);
               if (!mainMsgId) mainMsgId = msgResult.message_id;
             }
           }
@@ -237,27 +263,34 @@ export default async function postToTelegram(post: WallPostContext) {
             json.question ?? "Poll",
             pollOptions,
           );
+          sentMessageIds.push(post_msg.message_id);
 
-          await Post.create({
-            vk_id: post.wall.id,
-            vk_author_id: post.wall.ownerId,
-            tg_id: post_msg.message_id,
-            discussion_tg_id: null,
-            tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
-            created_at: post.wall.createdAt,
+          if (!recordCreated) {
+            await Post.create({
+              vk_id: post.wall.id,
+              vk_author_id: post.wall.ownerId,
+              tg_id: sentMessageIds[0] as number,
+              tg_ids: sentMessageIds,
+              discussion_tg_id: null,
+              tg_author_id: JSON.stringify(post_msg.from?.id ?? null),
+              created_at: post.wall.createdAt,
 
-            attachments: JSON.stringify(post.wall.attachments),
-          });
+              attachments: JSON.stringify(post.wall.attachments),
+            });
+            recordCreated = true;
+          }
         }
       }
     } else {
       let mainMsgId = null;
       let post_msg: Message.TextMessage | undefined;
+      lastPostMsg = post_msg;
 
       for (const [index, part] of textParts.entries()) {
         post_msg = await tgApi.telegram.sendMessage(tgChannelPublicLink, part, {
           parse_mode: "HTML",
         });
+        sentMessageIds.push(post_msg.message_id);
 
         if (index === 0) {
           mainMsgId = post_msg.message_id;
@@ -267,21 +300,21 @@ export default async function postToTelegram(post: WallPostContext) {
         await Post.create({
           vk_id: post.wall.id,
           vk_author_id: post.wall.ownerId,
-          tg_id: mainMsgId as number,
+          tg_id: sentMessageIds[0] as number,
+          tg_ids: sentMessageIds,
           discussion_tg_id: null,
           tg_author_id: JSON.stringify(post_msg?.from?.id ?? null),
           created_at: post.wall.createdAt,
-
           attachments: JSON.stringify(post.wall.attachments),
         });
       } catch (error: unknown) {
-        if (error instanceof DatabaseError) {
+        if (error instanceof BaseError) {
           logger.error(
-            `[VK -!-> TG] Ported, but binding has failed: ${error instanceof Error ? error.message : String(error)}`,
+            `[VK -!-> TG] Ported, but binding has failed: ${String(error)}`,
           );
         }
         logger.error(
-          `[VK -!-> TG] Ported, but unknown database error appeared: ${error instanceof Error ? error.message : String(error)}`,
+          `[VK -!-> TG] Ported, but unknown database error appeared: ${String(error)}`,
         );
         return;
       }
@@ -291,9 +324,22 @@ export default async function postToTelegram(post: WallPostContext) {
     );
   } catch (error: unknown) {
     if (error) {
-      logger.error(
-        `[VK -/-> TG] Error while porting: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      const errorTraceback = {
+        message: String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        context: JSON.stringify(post),
+        db_context: {
+          vk_id: post.wall.id,
+          vk_author_id: post.wall.ownerId,
+          tg_id: lastPostMsg?.message_id as number,
+          discussion_tg_id: null,
+          tg_author_id: JSON.stringify(lastPostMsg?.from?.id ?? null),
+          created_at: post.wall.createdAt,
+          attachments: JSON.stringify(post.wall.attachments),
+        },
+      };
+      logger.error(`[VK -/-> TG] Error while porting: ${error}`);
+      logger.debug(`Error traceback: ${JSON.stringify(errorTraceback)}`);
     }
   }
 }

@@ -15,6 +15,7 @@ export type Post = {
   vk_id: number;
   vk_author_id: number | null;
   tg_id: number;
+  tg_ids: number[] | null;
   discussion_tg_id: number | null;
   tg_author_id: string | null;
   created_at: number | null;

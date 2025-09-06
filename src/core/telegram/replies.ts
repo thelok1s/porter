@@ -15,13 +15,17 @@ export default async function replyToTelegram(reply: CommentContext) {
   try {
     const post = await Post.findOne({
       where: { vk_id: reply.objectId },
-      attributes: ["discussion_tg_id"],
+      attributes: ["discussion_tg_id", "tg_id"],
     });
 
-    if (!post?.discussion_tg_id) {
+    const threadMsgId = Number(post?.discussion_tg_id ?? post?.tg_id ?? 0);
+    if (!threadMsgId) {
       logger.warn(`Discussion not found for msg id[${reply.objectId}]`);
       return;
     }
+    // ensure routing to first message id if discussion thread id is not yet linked
+    (post as unknown as { discussion_tg_id: number }).discussion_tg_id =
+      threadMsgId;
 
     const [sender] = (await vkGlobalApi.users.get({
       user_ids: [reply.fromId],
@@ -91,7 +95,7 @@ export default async function replyToTelegram(reply: CommentContext) {
                     index === 0
                       ? {
                           chat_id: tgChatId,
-                          message_id: post.discussion_tg_id,
+                          message_id: threadMsgId,
                         }
                       : undefined,
                   link_preview_options: { is_disabled: true },
@@ -131,7 +135,7 @@ export default async function replyToTelegram(reply: CommentContext) {
               {
                 reply_parameters: {
                   chat_id: tgChatId,
-                  message_id: post.discussion_tg_id,
+                  message_id: threadMsgId,
                 },
               },
             );
@@ -142,7 +146,7 @@ export default async function replyToTelegram(reply: CommentContext) {
             vk_reply_id: reply.id,
             vk_author_id: reply.ownerId,
             tg_reply_id: reply_msg[0]?.message_id as number,
-            discussion_tg_id: post.discussion_tg_id,
+            discussion_tg_id: threadMsgId,
             tg_author_id: reply_msg[0]?.from?.id ?? null,
             created_at:
               typeof reply.createdAt === "number"
@@ -169,7 +173,7 @@ export default async function replyToTelegram(reply: CommentContext) {
                     index === 0
                       ? {
                           chat_id: tgChatId,
-                          message_id: post.discussion_tg_id,
+                          message_id: threadMsgId,
                         }
                       : undefined,
                   link_preview_options: { is_disabled: true },
@@ -198,7 +202,7 @@ export default async function replyToTelegram(reply: CommentContext) {
                 parse_mode: "HTML",
                 reply_parameters: {
                   chat_id: tgChatId,
-                  message_id: post.discussion_tg_id,
+                  message_id: threadMsgId,
                 },
               },
             );
@@ -209,7 +213,7 @@ export default async function replyToTelegram(reply: CommentContext) {
             vk_reply_id: reply.id,
             vk_author_id: reply.ownerId,
             tg_reply_id: reply_msg.message_id,
-            discussion_tg_id: post.discussion_tg_id,
+            discussion_tg_id: threadMsgId,
             tg_author_id: reply_msg?.from?.id ?? null,
             created_at:
               typeof reply.createdAt === "number"
@@ -241,7 +245,7 @@ export default async function replyToTelegram(reply: CommentContext) {
                     index === 0
                       ? {
                           chat_id: tgChatId,
-                          message_id: post.discussion_tg_id,
+                          message_id: threadMsgId,
                         }
                       : undefined,
                   link_preview_options: { is_disabled: true },
@@ -274,7 +278,7 @@ export default async function replyToTelegram(reply: CommentContext) {
                 parse_mode: "HTML",
                 reply_parameters: {
                   chat_id: tgChatId,
-                  message_id: Number(post.discussion_tg_id),
+                  message_id: threadMsgId,
                 },
               },
             );
@@ -285,7 +289,7 @@ export default async function replyToTelegram(reply: CommentContext) {
             vk_reply_id: reply.id,
             vk_author_id: reply.ownerId,
             tg_reply_id: reply_msg.message_id,
-            discussion_tg_id: post.discussion_tg_id,
+            discussion_tg_id: threadMsgId,
             tg_author_id: reply_msg?.from?.id ?? null,
             created_at:
               typeof reply.createdAt === "number"
@@ -306,7 +310,7 @@ export default async function replyToTelegram(reply: CommentContext) {
               index === 0
                 ? {
                     chat_id: tgChatId,
-                    message_id: post.discussion_tg_id,
+                    message_id: threadMsgId,
                   }
                 : undefined,
             link_preview_options: { is_disabled: true },
@@ -322,7 +326,7 @@ export default async function replyToTelegram(reply: CommentContext) {
             vk_reply_id: reply.id,
             vk_author_id: reply.ownerId,
             tg_reply_id: mainMsgId as number,
-            discussion_tg_id: post.discussion_tg_id,
+            discussion_tg_id: threadMsgId,
             tg_author_id: reply_msg?.from?.id ?? null,
             created_at:
               typeof reply.createdAt === "number"
@@ -332,7 +336,7 @@ export default async function replyToTelegram(reply: CommentContext) {
             attachments: JSON.stringify(reply.attachments || []),
           });
         } catch (error) {
-          logger.error(`Failed to create reply record: ${error}`);
+          logger.error(`Failed to create reply record: ${String(error)}`);
         }
 
         logger.info(
@@ -389,6 +393,6 @@ export default async function replyToTelegram(reply: CommentContext) {
       logger.info(`[VK –> TG] Reply deleted: ${reply.id}`);
     }
   } catch (error) {
-    logger.error(`Error handling reply ${reply?.id}: ${error}`);
+    logger.error(`Error handling reply ${reply?.id}: ${String(error)}`);
   }
 }
