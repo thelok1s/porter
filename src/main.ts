@@ -1,4 +1,4 @@
-import { PorterConfig as config } from "../porter.config";
+import { PorterConfig as config } from "../porter.config.ts";
 import replyToTelegram from "@/core/telegram/replies";
 import postToTelegram from "@/core/telegram/posts";
 import { vkGroupApi, tgApi, tgChannelId } from "@/core/api";
@@ -11,7 +11,6 @@ import type { Context as TelegrafContext } from "telegraf";
 import { CommentContext, WallPostContext } from "vk-io";
 import { TGDiscussionMessage } from "./types/Baseline";
 
-appFiglet();
 dotenv.config();
 const START_TIME = Math.floor(Date.now() / 1000);
 
@@ -37,6 +36,7 @@ async function main() {
   await initDatabase();
   await vkGroupApi.updates.start();
   tgApi.launch().then();
+  appFiglet();
 
   try {
     if (config.crossposting.enabled) {
@@ -215,14 +215,18 @@ main().catch((error: unknown) => {
   logger.error({ error });
 });
 
-["SIGINT", "SIGTERM", "SIGQUIT", "SIGKILL"].forEach((signal) => {
-  process.on(signal, async () => {
-    do {
-      await vkGroupApi.updates.stop();
-    } while (vkGroupApi.updates.isStarted);
-    tgApi.stop(signal.toString());
-    await closeDatabase();
-    logger.warn(`Shutting down (${signal.toString()})`);
-    process.exit(0);
-  });
+["SIGKILL", "SIGINT", "SIGTERM", "SIGQUIT"].forEach((signal) => {
+  try {
+    process.on(signal as NodeJS.Signals, async () => {
+      do {
+        await vkGroupApi.updates.stop();
+      } while (vkGroupApi.updates.isStarted);
+      tgApi.stop(signal.toString());
+      await closeDatabase();
+      logger.warn(`Shutting down (${signal.toString()})`);
+      process.exit(0);
+    });
+  } catch {
+    // Ignore environments where this signal cannot be watched (e.g., Windows or limited runtimes)
+  }
 });

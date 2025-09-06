@@ -15,6 +15,7 @@ import type {
   PollAttachment,
 } from "vk-io";
 import { formatMessageText, splitText } from "../utils";
+import { DatabaseError, SequelizeScopeError } from "sequelize";
 
 export default async function postToTelegram(post: WallPostContext) {
   // Check if repost
@@ -262,24 +263,37 @@ export default async function postToTelegram(post: WallPostContext) {
           mainMsgId = post_msg.message_id;
         }
       }
+      try {
+        await Post.create({
+          vk_id: post.wall.id,
+          vk_author_id: post.wall.ownerId,
+          tg_id: mainMsgId as number,
+          discussion_tg_id: null,
+          tg_author_id: JSON.stringify(post_msg?.from?.id ?? null),
+          created_at: post.wall.createdAt,
 
-      await Post.create({
-        vk_id: post.wall.id,
-        vk_author_id: post.wall.ownerId,
-        tg_id: mainMsgId as number,
-        discussion_tg_id: null,
-        tg_author_id: JSON.stringify(post_msg?.from?.id ?? null),
-        created_at: post.wall.createdAt,
-
-        attachments: JSON.stringify(post.wall.attachments),
-      });
+          attachments: JSON.stringify(post.wall.attachments),
+        });
+      } catch (error: unknown) {
+        if (error instanceof DatabaseError) {
+          logger.error(
+            `[VK -!-> TG] Ported, but binding has failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        logger.error(
+          `[VK -!-> TG] Ported, but unknown database error appeared: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
     }
     logger.info(
       `[VK –> TG] Successfully ported: ${getVkLink(post.wall.id, post.wall.ownerId)}`,
     );
   } catch (error: unknown) {
-    logger.error(
-      `[VK -/-> TG] Error while porting: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (error) {
+      logger.error(
+        `[VK -/-> TG] Error while porting: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }

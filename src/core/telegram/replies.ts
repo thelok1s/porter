@@ -19,7 +19,7 @@ export default async function replyToTelegram(reply: CommentContext) {
     });
 
     if (!post?.discussion_tg_id) {
-      logger.warn(`Discussion not found for msg id: ${reply.objectId}`);
+      logger.warn(`Discussion not found for msg id[${reply.objectId}]`);
       return;
     }
 
@@ -316,21 +316,25 @@ export default async function replyToTelegram(reply: CommentContext) {
             mainMsgId = reply_msg.message_id;
           }
         }
+        try {
+          await ReplyModel.create({
+            vk_post_id: reply.objectId,
+            vk_reply_id: reply.id,
+            vk_author_id: reply.ownerId,
+            tg_reply_id: mainMsgId as number,
+            discussion_tg_id: post.discussion_tg_id,
+            tg_author_id: reply_msg?.from?.id ?? null,
+            created_at:
+              typeof reply.createdAt === "number"
+                ? new Date((reply.createdAt as number) * 1000)
+                : reply.createdAt,
 
-        await ReplyModel.create({
-          vk_post_id: reply.objectId,
-          vk_reply_id: reply.id,
-          vk_author_id: reply.ownerId,
-          tg_reply_id: mainMsgId as number,
-          discussion_tg_id: post.discussion_tg_id,
-          tg_author_id: reply_msg?.from?.id ?? null,
-          created_at:
-            typeof reply.createdAt === "number"
-              ? new Date((reply.createdAt as number) * 1000)
-              : reply.createdAt,
+            attachments: JSON.stringify(reply.attachments || []),
+          });
+        } catch (error) {
+          logger.error(`Failed to create reply record: ${error}`);
+        }
 
-          attachments: JSON.stringify(reply.attachments || []),
-        });
         logger.info(
           `[VK –> TG] Reply ported: ${reply.id} (for msg: ${mainMsgId})`,
         );

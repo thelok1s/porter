@@ -19,8 +19,9 @@
 
 ## Установка и запуск
 ### Требования
-* Node.js или иное окружение.
+* Node.js, Bun или Deno (любой из них)
 * Стабильное подключение к интернету (на этапе запуска)
+* Для SQLite установите npm-пакет sqlite3 (Sequelize требует его для диалекта sqlite)
 ### Конфигурация
 Создайте файл переменных окружения `.env` и заполните его переменными
 ```dotenv
@@ -31,15 +32,15 @@ TELEGRAM_CHANNEL_PUBLIC_LINK='@your_telegram_channel_public_link'
 TELEGRAM_CHAT_ID='-your_disscussion_group_id'
 ```
 
-### Bun
-`git clone thelok1s/porter && cd porter`
-`bun install`
-`bun run start`
+### Запуск
+- Node: `npm ci && npm run start`
+- Bun: `bun install && bun run start`
+- Deno: `deno task start` (задачи определены в deno.json)
 
 ### Скрипты
-`bun run prune` – очистка базы данных
-`bun run init` – инициализация базы данных
-`bun run flushlogs` – очистка логов (-h для инструкций)
+- prune: `npm run prune` / `bun run prune` / `deno task prune`
+- init: `npm run init` / `bun run init` / `deno task init`
+- flushlogs: `npm run flushlogs` / `bun run flushlogs` / `deno task flushlogs` (-h для инструкций)
 
 ## Прогресс разработки
 ### Кросспостинг

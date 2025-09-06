@@ -1,4 +1,4 @@
-import { Config } from "@/types/Config";
+import { Config } from "@/types/Config.ts";
 
 const PorterConfig: Config = {
   loggingLevel: "debug",

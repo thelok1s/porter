@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/denoland/deno/main/cli/schemas/config-file.v1.json",
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "start": "deno run -A --node-modules-dir --env-file=.env src/main.ts",
+    "prune": "deno run -A --node-modules-dir --env-file=.env src/scripts/prunedb.ts",
+    "init": "deno run -A --node-modules-dir --env-file=.env src/scripts/initdb.ts",
+    "flushlogs": "deno run -A --node-modules-dir --env-file=.env src/scripts/flushlogs.ts",
+    "lint": "deno run -A npm:eslint . --ext ts,js,mjs,cjs --report-unused-disable-directives --max-warnings 0"
+  },
+  "imports": {
+    "@/": "./src/"
+  },
+  "compilerOptions": {
+    "types": ["npm:@types/node"]
+  }
+}
