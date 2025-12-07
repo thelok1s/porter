@@ -12,17 +12,8 @@ export interface Config {
     | {
         enabled: true;
         origin: "vk" | "tg" | "both";
-        mode: "direct";
-      }
-    | {
-        enabled: true;
-        origin: "both";
-        mode: "summary";
       }
     | {
         enabled: false;
       };
-  notifications: {
-    enabled: boolean;
-  };
 }

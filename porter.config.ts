@@ -13,10 +13,6 @@ const PorterConfig: Config = {
   crosscommenting: {
     enabled: true,
     origin: "vk",
-    mode: "direct",
-  },
-  notifications: {
-    enabled: false,
   },
 };
 
