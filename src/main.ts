@@ -1,7 +1,8 @@
 import { PorterConfig as config } from "../porter.config.ts";
 import replyToTelegram from "@/core/telegram/replies";
+import { replyToVk } from "@/core/vk/comments";
 import postToTelegram from "@/core/telegram/posts";
-import { vkGroupApi, tgApi, tgChannelId } from "@/core/api";
+import { vkGroupApi, tgApi, tgChannelId, tgChatId } from "@/core/api";
 import { initDatabase, closeDatabase } from "@/lib/sequelize";
 import { Post } from "@/models/post.schema";
 import logger from "@/lib/logger";
@@ -109,11 +110,6 @@ async function main() {
               return;
             }
 
-            // At this point you have:
-            // - post.tg_id: original channel message id
-            // - post.discussion_tg_id: root discussion message id (thread)
-            // - msg: actual user comment inside the discussion
-
             // TODO: Persist the comment or crosspost to VK here
             logger.info(
               `[TG discussion] post.tg_id=${post.tg_id}, thread=${discussionRootId}, msg=${msg.message_id}, from=${msg.from?.id}`,
@@ -129,8 +125,9 @@ async function main() {
       }
     }
     if (config.crosscommenting.enabled) {
+      // Automatic forward detection - links discussion_tg_id when post is forwarded to discussion group
       tgApi.on("message", async (context: TelegrafContext) => {
-        logger.debug(JSON.parse(JSON.stringify(context)));
+        if (!context.message) return;
         const cm = context.message as TGDiscussionMessage | undefined;
         if (
           cm &&
@@ -200,18 +197,83 @@ async function main() {
         config.crosscommenting.origin === "both"
       ) {
         tgApi.on("message", async (context: TelegrafContext) => {
-          if (!context) return;
-          const msg = context.message as TGDiscussionMessage;
-          if (msg.is_automatic_forward || msg.from?.id === tgApi.botInfo?.id)
-            return;
+          if (!context.message || !tgChatId) return;
+          const msg = context.message;
+
+          // Skip automatic forwards and bot's own messages
+          if (context.message.from?.id === tgApi.botInfo?.id) return;
+          if (!(context.message.chat.id.toString() === tgChatId)) return;
+
+          try {
+            logger.debug({
+              logctx: "TG->VK comment processing",
+              msg_id: msg.message_id,
+              chat_id: msg.chat?.id,
+              from_id: msg.from?.id,
+              has_thread_id: typeof msg.message_thread_id === "number",
+            });
+
+            // Resolve the root discussion message id (the auto-forward from the channel)
+            let discussionRootId: number | null = null;
+
+            // If the discussion group uses forum topics, the thread id is provided
+            if (typeof msg.message_thread_id === "number") {
+              discussionRootId = msg.message_thread_id;
+              logger.debug(
+                `[TG -> VK] Using message_thread_id as discussion root: ${discussionRootId}`,
+              );
+            }
+
+            if (!discussionRootId) {
+              // Not part of any tracked discussion thread
+              logger.debug(
+                `[TG -> VK] Message ${msg.message_id} is not part of tracked discussion thread`,
+              );
+              return;
+            }
+
+            logger.debug(
+              `[TG -> VK] Looking up post with discussion_tg_id = ${discussionRootId}`,
+            );
+
+            // Find the mapped post by the discussion root
+            const post = await Post.findOne({
+              where: { discussion_tg_id: discussionRootId },
+              attributes: ["vk_id", "vk_author_id", "discussion_tg_id"],
+            });
+
+            if (!post || !post.vk_id) {
+              logger.warn(
+                `[TG -> VK] No VK post found for discussion root ${discussionRootId}. Check if post exists in database with this discussion_tg_id.`,
+              );
+              return;
+            }
+
+            logger.info(
+              `[TG -> VK] Found post mapping: discussion_tg_id=${discussionRootId} -> vk_id=${post.vk_id}`,
+            );
+
+            // Port the comment to VK
+            const messageText =
+              (msg as { text?: string; caption?: string }).text ||
+              (msg as { text?: string; caption?: string }).caption;
+            await replyToVk(msg, post, messageText);
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const errStack = err instanceof Error ? err.stack : undefined;
+            logger.error(
+              `[TG -> VK] Failed to process discussion message ${msg.message_id}: ${errMsg}`,
+            );
+            if (errStack) {
+              logger.debug(`[TG -> VK] Error stack: ${errStack}`);
+            }
+          }
         });
       }
     }
 
     logger.debug("Logger level is set to debug");
     logger.info("Bot started successfully (･ω<)☆ \n");
-
-    //  const sync = setInterval(() => {syncRecentPosts()}, 1000*60*10);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     logger.error(`Runtime error: ${msg}`);

@@ -20,17 +20,25 @@ export default async function replyToTelegram(reply: CommentContext) {
   try {
     const post = await Post.findOne({
       where: { vk_id: reply.objectId },
-      attributes: ["discussion_tg_id", "tg_id"],
+      attributes: ["discussion_tg_id", "tg_id", "vk_id"],
     });
 
-    const threadMsgId = Number(post?.discussion_tg_id ?? post?.tg_id ?? 0);
-    if (!threadMsgId) {
-      logger.warn(`Discussion not found for msg id[${reply.objectId}]`);
+    if (!post) {
+      logger.warn(`[VK -> TG] Post not found for VK ID ${reply.objectId}`);
       return;
     }
-    // ensure routing to first message id if discussion thread id is not yet linked
-    (post as unknown as { discussion_tg_id: number }).discussion_tg_id =
-      threadMsgId;
+
+    // We need the discussion_tg_id (the automatic forward in discussion group)
+    // If it's not set yet, we must wait for it
+    if (!post.discussion_tg_id) {
+      logger.warn(
+        `[VK -> TG] Discussion thread not linked yet for VK post ${reply.objectId}. ` +
+          `Comment ${reply.id} will be skipped. Wait for automatic forward to be detected.`,
+      );
+      return;
+    }
+
+    const threadMsgId = post.discussion_tg_id;
 
     // Check if this is a reply to another comment
     let replyToMessageId = threadMsgId;

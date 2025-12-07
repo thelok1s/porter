@@ -12,7 +12,7 @@ const PorterConfig: Config = {
   },
   crosscommenting: {
     enabled: true,
-    origin: "vk",
+    origin: "both",
   },
 };
 
