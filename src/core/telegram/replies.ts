@@ -37,14 +37,21 @@ export default async function replyToTelegram(reply: CommentContext) {
     if (reply.replyId) {
       const targetComment = await ReplyModel.findOne({
         where: { vk_reply_id: reply.replyId },
-        attributes: ["tg_reply_id"],
+        attributes: ["tg_reply_id", "vk_post_id"],
       });
 
       if (targetComment?.tg_reply_id) {
-        replyToMessageId = targetComment.tg_reply_id;
-        logger.info(
-          `[VK –> TG] Replying to VK comment ${reply.replyId} -> TG message ${replyToMessageId}`,
-        );
+        // verify the target comment belongs to the same VK post/thread
+        if (targetComment.vk_post_id === reply.objectId) {
+          replyToMessageId = targetComment.tg_reply_id;
+          logger.info(
+            `[VK –> TG] Replying to VK comment ${reply.replyId} -> TG message ${replyToMessageId}`,
+          );
+        } else {
+          logger.warn(
+            `Target comment ${reply.replyId} belongs to different post (${targetComment.vk_post_id} vs ${reply.objectId}), replying to thread instead`,
+          );
+        }
       } else {
         logger.warn(
           `Target comment ${reply.replyId} not found in database, replying to thread instead`,

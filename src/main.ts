@@ -195,46 +195,17 @@ async function main() {
           },
         );
       }
-      // if (
-      //   config.crosscommenting.origin === "tg" ||
-      //   config.crosscommenting.origin === "both"
-      // ) {
-      //   tgApi.on("message", async (context: TelegrafContext) => {
-      //     if (!context) return;
-      //     const msg = context.message as TGDiscussionMessage;
-      //     if (msg.is_automatic_forward || msg.from?.id === tgApi.botInfo?.id)
-      //       return;
-
-      //     try {
-      //       // Find the mapped post by the discussion root
-      //       const post = await Post.findOne({
-      //         where: { discussion_tg_id: discussionRootId },
-      //       });
-      //       if (!post) {
-      //         logger.warn(
-      //           `No post found for discussion root ${discussionRootId}`,
-      //         );
-      //         return;
-      //       }
-
-      //       // At this point you have:
-      //       // - post.tg_id: original channel message id
-      //       // - post.discussion_tg_id: root discussion message id (thread)
-      //       // - msg: actual user comment inside the discussion
-
-      //       // TODO: Persist the comment or crosspost to VK here
-      //       logger.info(
-      //         `[TG discussion] post.tg_id=${post.tg_id}, thread=${discussionRootId}, msg=${msg.message_id}, from=${msg.from?.id}`,
-      //       );
-
-      //       // Example: call your future VK cross-comment function
-      //       // await replyToVk({ post, msg });
-      //     } catch (err: unknown) {
-      //       const msg = err instanceof Error ? err.message : String(err);
-      //       logger.error(`Failed to process TG discussion message: ${msg}`);
-      //     }
-      //   });
-      // }
+      if (
+        config.crosscommenting.origin === "tg" ||
+        config.crosscommenting.origin === "both"
+      ) {
+        tgApi.on("message", async (context: TelegrafContext) => {
+          if (!context) return;
+          const msg = context.message as TGDiscussionMessage;
+          if (msg.is_automatic_forward || msg.from?.id === tgApi.botInfo?.id)
+            return;
+        });
+      }
     }
 
     logger.debug("Logger level is set to debug");
